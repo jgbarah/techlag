@@ -1,0 +1,94 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+## Copyright (C) 2016 Bitergia
+##
+## This program is free software; you can redistribute it and/or modify
+## it under the terms of the GNU General Public License as published by
+## the Free Software Foundation; either version 3 of the License, or
+## (at your option) any later version.
+##
+## This program is distributed in the hope that it will be useful,
+## but WITHOUT ANY WARRANTY; without even the implied warranty of
+## MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+## GNU General Public License for more details.
+##
+## You should have received a copy of the GNU General Public License
+## along with this program; if not, write to the Free Software
+## Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+##
+## Authors:
+##   Jesus M. Gonzalez-Barahona <jgb@bitergia.com>
+##
+
+description = """
+Compare directories
+
+Example:
+
+gitlag --repo git.repo -p git-2.7.0 --after 2016-02-01 --step 10 -l info
+
+"""
+
+import argparse
+import logging
+import tempfile
+import techlag.gitlag
+
+def parse_args ():
+    """
+    Parse command line arguments
+
+    """
+    parser = argparse.ArgumentParser(description = description)
+    parser.add_argument("-r", "--repo",
+                        help = "Git repo to compare")
+    parser.add_argument("-p", "--pkg",
+                        help = "Source package to compare")
+    parser.add_argument("-d", "--dpkg",
+                        help = "Debian source package to compare (dsc file)")
+    parser.add_argument("--debian_name", nargs=2,
+                        help = "Debian source package, name and release. Ex: git stretch/main")
+    parser.add_argument("--after", type=str,
+                        help = "Consider only commits after date (eg: 2016-01-31)")
+    parser.add_argument("--before", type=str,
+                        help = "Consider only commits before date (eg: 2016-01-31)")
+    parser.add_argument("-l", "--logging", type=str, choices=["info", "debug"],
+                        help = "Logging level for output")
+    parser.add_argument("--logfile", type=str,
+                        help = "Log file")
+    parser.add_argument("--step", type=int, default=1,
+                        help = "Step (compare every step commits, instead of all)")
+    args = parser.parse_args()
+    return args
+
+if __name__ == "__main__":
+    args = parse_args()
+    if args.logging:
+        log_format = '%(levelname)s:%(message)s'
+        if args.logging == "info":
+            level = logging.INFO
+        elif args.logging == "debug":
+            level = logging.DEBUG
+        if args.logfile:
+            logging.basicConfig(format=log_format, level=level,
+                                filename = args.logfile, filemode = "w")
+        else:
+            logging.basicConfig(format=log_format, level=level)
+
+    if args.dpkg:
+        dir = techlag.gitlag.extract_dpkg(args.dpkg)
+    elif args.debian_name:
+        pkg_name = args.debian_name[0]
+        pkg_release = args.debian_name[1]
+        store = tempfile.TemporaryDirectory()
+        dsc_file = techlag.gitlag.get_dpkg(name=pkg_name, release=pkg_release, dir=store.name)
+        dir = techlag.gitlag.extract_dpkg(dsc_file)
+    else:
+        dir = args.pkg
+
+    up_commit = techlag.gitlag.find_upstream_commit (upstream=args.repo, dir=dir,
+                                                    after=args.after, step=args.step)
+    print ("Most similar checkout: %d (diff: %d), date: %s, hash: %s." %
+            (up_commit['sequence'], up_commit['diff'],
+            up_commit['date'], up_commit['hash']))
