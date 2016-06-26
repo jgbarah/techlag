@@ -34,6 +34,7 @@ import argparse
 import logging
 import tempfile
 import techlag.gitlag
+import datetime
 
 def parse_args ():
     """
@@ -47,8 +48,8 @@ def parse_args ():
                         help = "Source package to compare")
     parser.add_argument("-d", "--dpkg",
                         help = "Debian source package to compare (dsc file)")
-    parser.add_argument("--debian_name", nargs=2,
-                        help = "Debian source package, name and release. Ex: git stretch/main")
+    parser.add_argument("--debian_name", nargs='+',
+                        help = "Debian source packages, (name and releases). Ex: git stretch/main lenny/main")
     parser.add_argument("--after", type=str,
                         help = "Consider only commits after date (eg: 2016-01-31)")
     parser.add_argument("--before", type=str,
@@ -61,6 +62,25 @@ def parse_args ():
                         help = "Step (compare every step commits, instead of all)")
     args = parser.parse_args()
     return args
+
+def lag (upstream, dir, after, step):
+    """Compute technical lag for directory with respect to upstream repository.
+
+    :params upstream: path to upstream git repository
+    :params dir:      path to directory (source code derived from upstream repo)
+    :params after:    check only commits after this date, format: %Y-%m-%d
+    :type after:      datetime.datetime
+    :params step:     do approximation according to this step
+
+    """
+
+    print(after)
+    up_commit = techlag.gitlag.find_upstream_commit (upstream=upstream, dir=dir,
+                                                    after=after, step=step)
+    print ("Most similar checkout: %d (diff: %d), date: %s, hash: %s." %
+            (up_commit['sequence'], up_commit['diff'],
+            up_commit['date'], up_commit['hash']))
+
 
 if __name__ == "__main__":
     args = parse_args()
@@ -80,15 +100,22 @@ if __name__ == "__main__":
         dir = techlag.gitlag.extract_dpkg(args.dpkg)
     elif args.debian_name:
         pkg_name = args.debian_name[0]
-        pkg_release = args.debian_name[1]
+        pkg_releases = args.debian_name[1:]
+    else:
+        pkg_releases = []
+
+    if args.after:
+        after = datetime.datetime.strptime(args.after, '%Y-%m-%d')
+    else:
+        after = None
+
+    if len(pkg_releases) > 0:
         store = tempfile.TemporaryDirectory()
-        dsc_file = techlag.gitlag.get_dpkg(name=pkg_name, release=pkg_release, dir=store.name)
-        dir = techlag.gitlag.extract_dpkg(dsc_file)
+        for pkg_release in pkg_releases:
+            dsc_file = techlag.gitlag.get_dpkg(name=pkg_name, release=pkg_release, dir=store.name)
+            dir = techlag.gitlag.extract_dpkg(dsc_file)
+
+            lag (upstream=args.repo, dir=dir, after=after, step=args.step)
     else:
         dir = args.pkg
-
-    up_commit = techlag.gitlag.find_upstream_commit (upstream=args.repo, dir=dir,
-                                                    after=args.after, step=args.step)
-    print ("Most similar checkout: %d (diff: %d), date: %s, hash: %s." %
-            (up_commit['sequence'], up_commit['diff'],
-            up_commit['date'], up_commit['hash']))
+        lag (upstream=args.repo, dir=dir, after=after, step=args.step)

@@ -31,7 +31,6 @@ import perceval.backends
 import subprocess
 import logging
 import io
-import datetime
 
 def get_dpkg_data (file_name, pkg_name):
     """Get the urls of the components of a source package in aSources.gz file.
@@ -95,7 +94,9 @@ def get_dpkg(name, release, dir):
     debian_repo = 'http://ftp.es.debian.org/debian/'
     sources_url = debian_repo + 'dists/' + release + '/source/Sources.gz'
     sources_file = os.path.join(dir, 'Sources.gz')
+    logging.info ("Downloading {} to {}".format(sources_url, sources_file))
     urllib.request.urlretrieve(sources_url, sources_file)
+
     pkg_data = get_dpkg_data(sources_file, name)
     for file in pkg_data['components']:
         file_url = debian_repo + pkg_data['directory'] + "/" + file
@@ -396,15 +397,16 @@ def find_upstream_commit (upstream, dir, after, step):
 
     :params upstream: upstream git repository
     :params dir: source code directory to match to upstream
-    :params after: check only commits after this date, format: %Y-%m-%d
+    :params after: check only commits after this date
+    :type after:   datetime.datetime
+    :params step: do approximation according to this step
     :returns:
 
     """
 
     metrics = Metrics(repo=upstream, dir=dir)
     git_parser = perceval.backends.git.Git(uri=upstream, gitpath=upstream)
-    from_date = datetime.datetime.strptime(after, '%Y-%m-%d')
-    for item in git_parser.fetch(from_date = from_date, branches=['master']):
+    for item in git_parser.fetch(from_date = after, branches=['master']):
         metrics.add_commit(item['data']['commit'], item['data']['CommitDate'])
     logging.info("%d commits parsed." % metrics.num_commits())
 
