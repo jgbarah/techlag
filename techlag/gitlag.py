@@ -25,6 +25,7 @@ import filecmp
 import difflib
 import os
 import os.path
+import shutil
 import gzip
 import urllib.request
 import perceval.backends
@@ -258,6 +259,19 @@ class Metrics:
 
         self.commits.append([commit, date])
 
+    def add_commits(self, commits):
+        """Update info about commits to data structure.
+
+        Commits come as a list of dictionaries, one per commit, in order
+        (according to the order in Perceval, or git log for that matter).
+        Each item in the list is a list [commit, date].
+
+        :params commits: list of hashes for commits
+
+        """
+
+        self.commits = commits
+
     def get_commit(self, seq_no):
         """Get a commit tuple (hash, date) for a given commit sequence.
 
@@ -282,14 +296,14 @@ class Metrics:
          * date: commit date for the commit (as a string)
 
         :params commits: list of all commits
-        :params commmit_no: commit number (starting in 0)
+        :params commit_no: commit number (starting in 0)
         :returns: dictionary with metrics
         """
 
         commit = self.commits[commit_no]
-        subprocess.call(["git", "-C", self.repo, "checkout", commit[0]],
+        subprocess.call(["git", "-C", self.repo.dir, "checkout", commit[0]],
                         stdout = subprocess.DEVNULL, stderr = subprocess.DEVNULL)
-        dcmp = filecmp.dircmp(self.repo, self.dir)
+        dcmp = filecmp.dircmp(self.repo.dir, self.dir)
         m = compare_dirs(dcmp)
         logging.debug ("Commit %s. Files: %d, %d, %d, lines: %d, %d, %d, %d)"
             % (commit[0], m["left_files"], m["right_files"], m["diff_files"],
@@ -383,6 +397,104 @@ class Metrics:
         return [self.metrics[seq_no] for seq_no in sorted(self.metrics)]
         #return self.metrics.values()
 
+class Repo:
+    """Metainformation about a git repository.
+
+    :params url:      repo url
+    :params dir:      path of directory for repo
+    :params after:    only considering commits after this date (default None, means all considered)
+    :type after:      datetime.datetime
+    :params branches: branches to consider (default None, means "all branches")
+    :type branches:   list of str
+
+    """
+
+    def __init__(self, url, dir, after=None, branches=None):
+
+        self.url = url
+        self.dir = dir
+        self.after = after
+        self.branches = branches
+        parser = perceval.backends.git.Git(uri=self.url, gitpath=self.dir)
+        self.commits = []
+        for item in parser.fetch(from_date = self.after, branches=self.branches):
+            self.commits.append([item['data']['commit'], item['data']['CommitDate']])
+
+    def get_commits (self):
+        """Get list of commits.
+
+        :returns:         list of commits (each commit is a list [hash, date])
+
+        """
+
+        return self.commits
+
+    def last_commit (self):
+        """Get last commit number.
+
+        """
+
+        return len(self.commits) - 1
+
+    def checkout(self, commit_no, store=None):
+        """Copy a checkout of the repo to dir.
+
+        If store is None, just checkout the commit in the repo, but don't
+        copy it to a directory. If not none, it will be the directory for
+        storage, where a directory will be produced, with the hash as name,
+        to copy the checkout.
+        If specified, store should exist. If there is already a checkout for
+        this commit in store, just checkout in the repository, but don't copy.
+
+        :params commit_no: commit number to check out
+        :params store:     directory to copy the checkout to (default: None)
+        :returns:          path of directory with the checkout, or None if none
+
+        """
+
+        hash = self.commits[commit_no][0]
+        subprocess.call(["git", "-C", self.dir, "checkout", hash],
+                        stdout = subprocess.DEVNULL, stderr = subprocess.DEVNULL)
+        if store is not None:
+            checkout_dir = os.path.join(store, hash)
+            if not os.path.isdir(checkout_dir):
+                shutil.copytree(self.dir, checkout_dir)
+            return checkout_dir
+        else:
+            return None
+
+    def compute_diff(self, commit_no, dir):
+        """Compute diff metrics between the repo checkout for commit_no and dir.
+
+        Checks out commit_no (as per git log order) in the git repository, and
+        computes the metrics for its difference with the given directory.
+        The returned metrics are those produced by compare_dirs plus:
+         * commit: hash for the commit
+         * date: commit date for the commit (as a string)
+
+        :params commit_no: commit number to checkout
+        :params dir:       directory to compare
+        :returns: dictionary with metrics
+        """
+
+        commit = self.commits[commit_no]
+        self.checkout(commit_no)
+        dcmp = filecmp.dircmp(self.dir, dir)
+        m = compare_dirs(dcmp)
+
+        logging.debug ("Commit %s. Files: %d, %d, %d, lines: %d, %d, %d, %d)"
+            % (commit[0], m["left_files"], m["right_files"], m["diff_files"],
+            m["left_lines"], m["right_lines"],
+            m["added_lines"], m["removed_lines"]))
+        m["total_files"] = m["left_files"] + m["right_files"] + m["diff_files"]
+        m["total_lines"] = m["left_lines"] + m["right_lines"] \
+            + m["added_lines"] + m["removed_lines"]
+        m["commit_seq"] = commit_no
+        m["commit"] = commit[0]
+        m["date"] = commit[1]
+        return m
+
+
 def find_upstream_commit (upstream, dir, after, step):
     """Find the most likely upstream commit.
 
@@ -395,19 +507,18 @@ def find_upstream_commit (upstream, dir, after, step):
     (commit) from it. Therefore, we use several metrics to estimate how
     close any checkout from the upstream repo is to the directory.
 
-    :params upstream: upstream git repository
-    :params dir: source code directory to match to upstream
-    :params after: check only commits after this date
-    :type after:   datetime.datetime
-    :params step: do approximation according to this step
-    :returns:
+    :params upstream: upstream git repository metadata
+    :type upstream:   Repo
+    :params dir:      source code directory to match to upstream
+    :params after:    check only commits after this date
+    :type after:      datetime.datetime
+    :params step:     do approximation according to this step
+    :returns:         dictionary with infom about most similar commit
 
     """
 
     metrics = Metrics(repo=upstream, dir=dir)
-    git_parser = perceval.backends.git.Git(uri=upstream, gitpath=upstream)
-    for item in git_parser.fetch(from_date = after, branches=['master']):
-        metrics.add_commit(item['data']['commit'], item['data']['CommitDate'])
+    metrics.add_commits(upstream.get_commits())
     logging.info("%d commits parsed." % metrics.num_commits())
 
     left = 0

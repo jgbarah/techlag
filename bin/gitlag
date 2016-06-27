@@ -63,24 +63,26 @@ def parse_args ():
     args = parser.parse_args()
     return args
 
-def lag (upstream, dir, after, step):
+def lag (upstream, dir, after, step, store):
     """Compute technical lag for directory with respect to upstream repository.
 
-    :params upstream: path to upstream git repository
+    :params upstream: upstream git repository Metainformation
+    :type upstream:   techlag.gitlago.Repo
     :params dir:      path to directory (source code derived from upstream repo)
     :params after:    check only commits after this date, format: %Y-%m-%d
     :type after:      datetime.datetime
     :params step:     do approximation according to this step
-
+    :params store:    directory to store checkouts
     """
 
-    print(after)
     up_commit = techlag.gitlag.find_upstream_commit (upstream=upstream, dir=dir,
                                                     after=after, step=step)
     print ("Most similar checkout: %d (diff: %d), date: %s, hash: %s." %
             (up_commit['sequence'], up_commit['diff'],
             up_commit['date'], up_commit['hash']))
-
+    checkout = upstream.checkout(commit_no=upstream.last_commit(), store=store)
+    metrics = upstream.compute_diff(commit_no=up_commit['sequence'], dir=checkout)
+    print (metrics)
 
 if __name__ == "__main__":
     args = parse_args()
@@ -109,13 +111,15 @@ if __name__ == "__main__":
     else:
         after = None
 
+    upstream = techlag.gitlag.Repo(url=args.repo, dir=args.repo,
+                                    after=after, branches=['master'])
+
+    store = tempfile.TemporaryDirectory()
     if len(pkg_releases) > 0:
-        store = tempfile.TemporaryDirectory()
         for pkg_release in pkg_releases:
             dsc_file = techlag.gitlag.get_dpkg(name=pkg_name, release=pkg_release, dir=store.name)
             dir = techlag.gitlag.extract_dpkg(dsc_file)
-
-            lag (upstream=args.repo, dir=dir, after=after, step=args.step)
+            lag (upstream=upstream, dir=dir, after=after, step=args.step, store=store.name)
     else:
         dir = args.pkg
-        lag (upstream=args.repo, dir=dir, after=after, step=args.step)
+        lag (upstream=upstream, dir=dir, after=after, step=args.step, store=store.name)

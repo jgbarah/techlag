@@ -15,11 +15,19 @@ Some examples on how to run the script for finding the most likely upstream comm
 * For comparing the source directory `git-2.7.0` with the git repository `git.repo`, assuming the most likely commit was authored after 2016-02-01, and using a step of 10 (test every 10 commmits) for a start.
 
 ```
-gitlag.py --repo git.repo -p git-2.7.0 --after 2016-02-01 --step 10 -l info
+gitlag --repo git.repo -p git-2.7.0 --after 2016-02-01 --step 10 -l info
 ```
 
-* For comparing the source Debian package `git`, as found in the Debian repository for the `stretch/main` release , assuming the most likely commit was authored after 2016-02-01, and using a step of 10 (test every 10 commmits) for a start. Store the output (a line describing the most likely commit) in `/tmp/diff-git.output`:
+* For comparing the source Debian package `git`, as found in the Debian repository for the `stretch/main` release, assuming the most likely commit was authored after 2016-02-01, and using a step of 10 (test every 10 commmits) for a start. Store the output (a line describing the most likely commit) in `/tmp/diff-git.output`:
 
 ```
-gitlag.py --debian_name git stretch/main --repo git.repo --after 2016-02-01 --step 10 -l info > /tmp/diff-git.output
+gitlag --debian_name git stretch/main --repo git.repo --after 2016-02-01 --step 10 -l info > /tmp/diff-git.output
 ```
+
+* For comparing the source Debian package `git`, as found in the Debian repositories for the `jessie/main`, `stretch/main`, `wheezy/main`, and `sid/main` releases, assuming the most likely commit was authored after 2014-02-01, and using a step of 10 (test every 10 commmits) for a start. Store the output (a line describing the most likely commit) in `/tmp/diff-git.output`:
+
+```
+gitlag --debian_name git jessie/main stretch/main wheezy/main sid/main --repo git.repo --after 2014-02-01 --step 10 -l info > /tmp/diff-git.output
+```
+
+jessie/main stretch/main wheezy/main sid/main
