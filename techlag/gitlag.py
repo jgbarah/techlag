@@ -321,7 +321,7 @@ class Metrics:
         """Compute metrics for a range of commits.
 
         Compute metrics for a range of commits, but only for those in the
-        appropriate step.
+        appropriate steps.
 
         :params first: first commit to consider
         :params last: last commit to consider
@@ -371,8 +371,8 @@ class Metrics:
                     # And now add value to the right
                     values.append(value)
                     indexes.append(seq_no)
-            logging.info("values: " + str(values))
-            logging.info("indexes " + str(indexes))
+            logging.debug("values: " + str(values))
+            logging.debug("indexes " + str(indexes))
         min_value = min(values)
         min_index = indexes[values.index(min_value)]
         # Add next computed checkout on the left and on the right, just in case we're
@@ -495,7 +495,7 @@ class Repo:
         return m
 
 
-def find_upstream_commit (upstream, dir, after, step):
+def find_upstream_commit (upstream, dir, after, steps):
     """Find the most likely upstream commit.
 
     Compares a source code directory with the checkouts from its upstream
@@ -512,7 +512,7 @@ def find_upstream_commit (upstream, dir, after, step):
     :params dir:      source code directory to match to upstream
     :params after:    check only commits after this date
     :type after:      datetime.datetime
-    :params step:     do approximation according to this step
+    :params steps:     do approximation according to these steps
     :returns:         dictionary with infom about most similar commit
 
     """
@@ -523,12 +523,22 @@ def find_upstream_commit (upstream, dir, after, step):
 
     left = 0
     right = metrics.num_commits()-1
+    # Next calculates the ceiling integer division
+    # Needed because we want eg. 1/3 to be 1
+    step = -(-metrics.num_commits() // steps)
     while step >= 1:
         metrics.compute_range (left, right, step)
-        (left, right, min_seq, min_value) = metrics.min_range(3, "total_lines")
+        (left, right, min_seq, min_value) = metrics.min_range(length=3, metric="total_lines")
         logging.info("Step: %d, left: %d, right: %d, min. seq: %d, min. value: %d."
                     % (step, left, right, min_seq, min_value))
-        step = step // 2
+        if step == 1:
+            step = 0
+        else:
+            candidate_step = -(-(right-left) // steps)
+            if candidate_step >= step:
+                step = step - 1
+            else:
+                step = candidate_step
     min_commit = metrics.get_commit(min_seq)
     most_similar = {
         'sequence': min_seq,

@@ -26,7 +26,7 @@ Compare directories
 
 Example:
 
-gitlag --repo git.repo -p git-2.7.0 --after 2016-02-01 --step 10 -l info
+gitlag --repo git.repo -p git-2.7.0 --after 2016-02-01 --steps 10 -l info
 
 """
 
@@ -58,31 +58,40 @@ def parse_args ():
                         help = "Logging level for output")
     parser.add_argument("--logfile", type=str,
                         help = "Log file")
-    parser.add_argument("--step", type=int, default=1,
-                        help = "Step (compare every step commits, instead of all)")
+    parser.add_argument("--steps", type=int, default=1,
+                        help = "Steps (compare every steps commits, instead of all)")
     args = parser.parse_args()
     return args
 
-def lag (upstream, dir, after, step, store):
+def lag (name, upstream, dir, after, steps, store):
     """Compute technical lag for directory with respect to upstream repository.
 
+    :param name:      name of package being computed
+    :type name:       string
     :params upstream: upstream git repository Metainformation
     :type upstream:   techlag.gitlago.Repo
     :params dir:      path to directory (source code derived from upstream repo)
     :params after:    check only commits after this date, format: %Y-%m-%d
     :type after:      datetime.datetime
-    :params step:     do approximation according to this step
+    :params steps:     do approximation according to these steps
     :params store:    directory to store checkouts
+
     """
 
     up_commit = techlag.gitlag.find_upstream_commit (upstream=upstream, dir=dir,
-                                                    after=after, step=step)
-    print ("Most similar checkout: %d (diff: %d), date: %s, hash: %s." %
-            (up_commit['sequence'], up_commit['diff'],
-            up_commit['date'], up_commit['hash']))
+                                                    after=after, steps=steps)
+    logging.info ("{}: most similar upstream checkout is {} (diff: {}, date: {}, hash: {}).".format(
+            name, up_commit['sequence'], up_commit['diff'],
+            up_commit['date'], up_commit['hash']
+            ))
     checkout = upstream.checkout(commit_no=upstream.last_commit(), store=store)
     metrics = upstream.compute_diff(commit_no=up_commit['sequence'], dir=checkout)
-    print (metrics)
+    logging.info (metrics)
+    metrics['diff_commits'] = upstream.last_commit() - metrics['commit_seq']
+    result_str = "{}: technical lag to master HEAD {} (commits), {} (lines), {} (files)"
+    print (result_str.format(name, metrics['diff_commits'],
+                            metrics['total_lines'], metrics['total_files']),
+        flush=True)
 
 if __name__ == "__main__":
     args = parse_args()
@@ -119,7 +128,8 @@ if __name__ == "__main__":
         for pkg_release in pkg_releases:
             dsc_file = techlag.gitlag.get_dpkg(name=pkg_name, release=pkg_release, dir=store.name)
             dir = techlag.gitlag.extract_dpkg(dsc_file)
-            lag (upstream=upstream, dir=dir, after=after, step=args.step, store=store.name)
+            lag (name=pkg_name+':'+pkg_release, upstream=upstream,
+                dir=dir, after=after, steps=args.steps, store=store.name)
     else:
         dir = args.pkg
-        lag (upstream=upstream, dir=dir, after=after, step=args.step, store=store.name)
+        lag (upstream=upstream, dir=dir, after=after, steps=args.steps, store=store.name)
