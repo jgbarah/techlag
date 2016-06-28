@@ -44,8 +44,8 @@ def get_dpkg_data (file_name, pkg_name):
     element 'components' (list with the names of file components, including
     .dsc, as they appear in Sources.gz)
 
-    :params filename: path of the Sources.gz file to parse
-    :params pkg_name: name of the package to find in the Sources.gz file
+    :param filename: path of the Sources.gz file to parse
+    :param pkg_name: name of the package to find in the Sources.gz file
     :returns: remote directory and list of urls of the components
 
     """
@@ -85,9 +85,9 @@ def get_dpkg(name, release, dir):
     Sources.gz file  for the corresponding distribution (eg: testing/main),
     looks in it for the components of the package, and downloads them.
 
-    :params    name: name of the Debian package
-    :params release: Debian release
-    :params     dir: name (path) of the directory to download the components
+    :param    name: name of the Debian package
+    :param release: Debian release
+    :param     dir: name (path) of the directory to download the components
     :returns: path of the downloaded dsc file for the package
 
     """
@@ -113,7 +113,7 @@ def extract_dpkg(dpkg):
     original file and the diff file should be in the same directory). This
     function assumes that dpkg-source is already installed and ready to run.
 
-    :params   dpkg: dsc file for a Debian package
+    :param   dpkg: dsc file for a Debian package
     :returns: name of directory where the package was extracted.
 
     """
@@ -133,8 +133,8 @@ def count_unique(dir, files):
     Unique files are those that are only in one of the directories
     that are compared (left or right).
 
-    :params dir: directory to count
-    :params files: files in that directory
+    :param dir: directory to count
+    :param files: files in that directory
     :returns: tuple with number of files and total lines in those files
 
     """
@@ -154,8 +154,8 @@ def count_unique(dir, files):
 def compare_files(file_left, file_right):
     """Compare two files.
 
-    :params file_left: left file to compare
-    :params file_right: left file to compare
+    :param file_left: left file to compare
+    :param file_right: left file to compare
     :returns: tuple with 1 (if different), 0 (if equal), lines added, removed
 
     """
@@ -182,9 +182,9 @@ def count_common(dir_left, dir_right, files):
     Common files are those that are in both directories being compared
     (left or right).
 
-    :params dir_left: left directory to count
-    :params dir_right: right directory to count
-    :params files: files in both directories
+    :param dir_left: left directory to count
+    :param dir_right: right directory to count
+    :param files: files in both directories
     :returns: tuple with number of diff files, and total lines added,
         removed in those files
     """
@@ -215,7 +215,7 @@ def compare_dirs(dcmp):
 
     added_lines, removed_lines refer only to files counted as diff_files
 
-    :params dcmp: filecmp.dircmp object for directories to compare
+    :param dcmp: filecmp.dircmp object for directories to compare
     :returns: dictionary with differences
 
     """
@@ -252,8 +252,8 @@ class Metrics:
     def add_commit(self, commit, date):
         """Add commit info to data structure.
 
-        :params commit: hash of the commit
-        :params date: commit date
+        :param commit: hash of the commit
+        :param date: commit date
 
         """
 
@@ -266,7 +266,7 @@ class Metrics:
         (according to the order in Perceval, or git log for that matter).
         Each item in the list is a list [commit, date].
 
-        :params commits: list of hashes for commits
+        :param commits: list of hashes for commits
 
         """
 
@@ -295,8 +295,8 @@ class Metrics:
          * commit: hash for the commit
          * date: commit date for the commit (as a string)
 
-        :params commits: list of all commits
-        :params commit_no: commit number (starting in 0)
+        :param commits: list of all commits
+        :param commit_no: commit number (starting in 0)
         :returns: dictionary with metrics
         """
 
@@ -323,9 +323,9 @@ class Metrics:
         Compute metrics for a range of commits, but only for those in the
         appropriate steps.
 
-        :params first: first commit to consider
-        :params last: last commit to consider
-        :params step: only consider commits coincident with step
+        :param first: first commit to consider
+        :param last: last commit to consider
+        :param step: only consider commits coincident with step
         :returns: dictionary with (updated) metrics
 
         """
@@ -334,7 +334,7 @@ class Metrics:
             logging.info("Computing metrics for %d." % seq_no)
             if seq_no not in self.metrics:
                 m = self.compute_metrics(seq_no)
-                logging.info(m)
+                logging.debug(m)
                 self.metrics[seq_no] = m
 
     def min_range (self, length, metric):
@@ -345,8 +345,8 @@ class Metrics:
         the maximum sequence number for the range, the sequence number for
         the minimum value, and the minimum value.
 
-        :params length: length (number of values) of the range
-        :params metric: name of the metric to consider for comparison
+        :param length: length (number of values) of the range
+        :param metric: name of the metric to consider for comparison
         :returns: tuple (min, max, min_index, min_value)
 
         """
@@ -400,11 +400,11 @@ class Metrics:
 class Repo:
     """Metainformation about a git repository.
 
-    :params url:      repo url
-    :params dir:      path of directory for repo
-    :params after:    only considering commits after this date (default None, means all considered)
+    :param url:      repo url
+    :param dir:      path of directory for repo
+    :param after:    only considering commits after this date (default None, means all considered)
     :type after:      datetime.datetime
-    :params branches: branches to consider (default None, means "all branches")
+    :param branches: branches to consider (default None, means "all branches")
     :type branches:   list of str
 
     """
@@ -446,8 +446,8 @@ class Repo:
         If specified, store should exist. If there is already a checkout for
         this commit in store, just checkout in the repository, but don't copy.
 
-        :params commit_no: commit number to check out
-        :params store:     directory to copy the checkout to (default: None)
+        :param commit_no: commit number to check out
+        :param store:     directory to copy the checkout to (default: None)
         :returns:          path of directory with the checkout, or None if none
 
         """
@@ -472,8 +472,8 @@ class Repo:
          * commit: hash for the commit
          * date: commit date for the commit (as a string)
 
-        :params commit_no: commit number to checkout
-        :params dir:       directory to compare
+        :param commit_no: commit number to checkout
+        :param dir:       directory to compare
         :returns: dictionary with metrics
         """
 
@@ -495,7 +495,7 @@ class Repo:
         return m
 
 
-def find_upstream_commit (upstream, dir, after, steps):
+def find_upstream_commit (upstream, dir, after, steps, name=""):
     """Find the most likely upstream commit.
 
     Compares a source code directory with the checkouts from its upstream
@@ -507,12 +507,15 @@ def find_upstream_commit (upstream, dir, after, steps):
     (commit) from it. Therefore, we use several metrics to estimate how
     close any checkout from the upstream repo is to the directory.
 
-    :params upstream: upstream git repository metadata
+    :param upstream: upstream git repository metadata
     :type upstream:   Repo
-    :params dir:      source code directory to match to upstream
-    :params after:    check only commits after this date
+    :param dir:      source code directory to match to upstream
+    :param after:    check only commits after this date
     :type after:      datetime.datetime
-    :params steps:     do approximation according to these steps
+    :param steps:    do approximation according to these steps
+    :param name:      name of package being computed
+    :type name:       string
+
     :returns:         dictionary with infom about most similar commit
 
     """
@@ -546,14 +549,17 @@ def find_upstream_commit (upstream, dir, after, steps):
         'hash': min_commit[0],
         'date': min_commit[1]
     }
-    logging.debug ('== Stats for all analyzed commits:')
-    logging.debug ("commit_seq", "commit", "date", "total_files", "total_lines",
-        "left_files", "right_files", "diff_files",
-        sep=",", flush=True)
+    csv_header = "CSV,{name},commit_seq,date,total_lines," \
+        + "total_files,added_lines,removed_lines"
+    csv_string = "CSV,{name},{commit_seq:9d},{date},{total_lines:9d},{total_files:6d}," \
+        + "{added_lines:9d},{removed_lines:9d}"
+    logging.info(csv_header.format(name=name))
     for m in metrics.metrics_items():
-        logging.debug(m["commit_seq"], m["commit"], m["date"],
-            m["total_files"], m["total_lines"],
-            m["left_files"], m["right_files"], m["diff_files"],
-            m["left_lines"], m["right_lines"], m["added_lines"], m["removed_lines"],
-            sep=",", flush=True)
+        logging.info(csv_string.format(name=name,
+                                        commit_seq=m["commit_seq"],
+                                        date=m["date"],
+                                        total_lines=m["total_lines"],
+                                        total_files=m["total_files"],
+                                        added_lines=m["added_lines"],
+                                        removed_lines=m["removed_lines"]))
     return (most_similar)

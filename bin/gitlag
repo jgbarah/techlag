@@ -68,18 +68,19 @@ def lag (name, upstream, dir, after, steps, store):
 
     :param name:      name of package being computed
     :type name:       string
-    :params upstream: upstream git repository Metainformation
+    :param upstream: upstream git repository Metainformation
     :type upstream:   techlag.gitlago.Repo
-    :params dir:      path to directory (source code derived from upstream repo)
-    :params after:    check only commits after this date, format: %Y-%m-%d
+    :param dir:      path to directory (source code derived from upstream repo)
+    :param after:    check only commits after this date, format: %Y-%m-%d
     :type after:      datetime.datetime
-    :params steps:     do approximation according to these steps
-    :params store:    directory to store checkouts
+    :param steps:     do approximation according to these steps
+    :param store:    directory to store checkouts
 
     """
 
     up_commit = techlag.gitlag.find_upstream_commit (upstream=upstream, dir=dir,
-                                                    after=after, steps=steps)
+                                                    after=after, steps=steps,
+                                                    name=name)
     logging.info ("{}: most similar upstream checkout is {} (diff: {}, date: {}, hash: {}).".format(
             name, up_commit['sequence'], up_commit['diff'],
             up_commit['date'], up_commit['hash']
