@@ -32,6 +32,7 @@ import perceval.backends
 import subprocess
 import logging
 import io
+import datetime
 
 def get_dpkg_data (file_name, pkg_name):
     """Get the urls of the components of a source package in aSources.gz file.
@@ -413,7 +414,10 @@ class Repo:
 
         self.url = url
         self.dir = dir
-        self.after = after
+        if after is None:
+            self.after = datetime.datetime(1970, 1, 1, 0, 0)
+        else:
+            self.after = after
         self.branches = branches
         parser = perceval.backends.git.Git(uri=self.url, gitpath=self.dir)
         self.commits = []
@@ -537,7 +541,7 @@ def find_upstream_commit (upstream, dir, after, steps, name=""):
         if step == 1:
             step = 0
         else:
-            candidate_step = -(-(right-left) // steps)
+            candidate_step = -(-step // steps)
             if candidate_step >= step:
                 step = step - 1
             else:

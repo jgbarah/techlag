@@ -22,11 +22,13 @@
 ##
 
 description = """
-Compare directories
+Compare a collection of Debian packages with upstream
+
+The collection is read from a JSON file.
 
 Example:
 
-gitlag --repo git.repo -p git-2.7.0 --after 2016-02-01 --steps 10 -l info
+debianlag --conf pkgs.json -l info
 
 """
 
@@ -35,6 +37,8 @@ import logging
 import tempfile
 import techlag.gitlag
 import datetime
+import json
+import os.path
 
 def parse_args ():
     """
@@ -42,14 +46,8 @@ def parse_args ():
 
     """
     parser = argparse.ArgumentParser(description = description)
-    parser.add_argument("-r", "--repo",
+    parser.add_argument("-c", "--conf", required=True,
                         help = "Git repo to compare")
-    parser.add_argument("-p", "--pkg",
-                        help = "Source package to compare")
-    parser.add_argument("-d", "--dpkg",
-                        help = "Debian source package to compare (dsc file)")
-    parser.add_argument("--debian_name", nargs='+',
-                        help = "Debian source packages, (name and releases). Ex: git stretch/main lenny/main")
     parser.add_argument("--after", type=str,
                         help = "Consider only commits after date (eg: 2016-01-31)")
     parser.add_argument("--before", type=str,
@@ -108,29 +106,28 @@ if __name__ == "__main__":
         else:
             logging.basicConfig(format=log_format, level=level)
 
-    if args.dpkg:
-        dir = techlag.gitlag.extract_dpkg(args.dpkg)
-    elif args.debian_name:
-        pkg_name = args.debian_name[0]
-        pkg_releases = args.debian_name[1:]
-    else:
-        pkg_releases = []
+    with open(args.conf) as conf_file:
+        conf = json.load(conf_file)
 
     if args.after:
         after = datetime.datetime.strptime(args.after, '%Y-%m-%d')
     else:
         after = None
 
-    upstream = techlag.gitlag.Repo(url=args.repo, dir=args.repo,
-                                    after=after, branches=['master'])
+    #store = tempfile.TemporaryDirectory().name
+    store = '/tmp/debianlag'
+    for pkg in conf:
+        name = pkg['debian']['name']
+        releases = pkg['debian']['distros']
+        git_url = pkg['upstream']
+        git_dir = os.path.join(store, name + '.git')
 
-    store = tempfile.TemporaryDirectory()
-    if len(pkg_releases) > 0:
-        for pkg_release in pkg_releases:
-            dsc_file = techlag.gitlag.get_dpkg(name=pkg_name, release=pkg_release, dir=store.name)
+        upstream = techlag.gitlag.Repo(url=git_url, dir=git_dir,
+                                        after=after, branches=['master'])
+
+        for release in releases:
+            dsc_file = techlag.gitlag.get_dpkg(name=name, release=release,
+                                                dir=store)
             dir = techlag.gitlag.extract_dpkg(dsc_file)
-            lag (name=pkg_name+':'+pkg_release, upstream=upstream,
-                dir=dir, after=after, steps=args.steps, store=store.name)
-    else:
-        dir = args.pkg
-        lag (upstream=upstream, dir=dir, after=after, steps=args.steps, store=store.name)
+            lag (name=name+':'+release, upstream=upstream,
+                dir=dir, after=after, steps=args.steps, store=store)
