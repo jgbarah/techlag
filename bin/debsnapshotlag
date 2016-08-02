@@ -95,7 +95,7 @@ def lag (name, upstream, dir, after, steps, store):
 
 def get_json(url):
 
-    logging.info("get_json: " + url)
+    logging.debug("get_json: " + url)
     try:
         response = urllib.request.urlopen(url).read()
     except urllib.error.HTTPError as error:
@@ -106,6 +106,49 @@ def get_json(url):
     data = json.loads(response.decode('utf-8'))
     return data['result']
 
+def get_dpkg_snapshot(name, version, dir):
+    """Get a debian source package from Debian Snapshot, given its name and version.
+
+    Gets the components of the source code package from the corresponding Debian
+    repository, and stores them in dir. To do that, it first gets the
+    Sources.gz file  for the corresponding distribution (eg: testing/main),
+    looks in it for the components of the package, and downloads them.
+
+    :param    name: name of the Debian package
+    :param version: Debian version
+    :param     dir: name (path) of the directory to download the components
+    :returns: path of the downloaded dsc file for the package
+
+    """
+
+    # Get the url describing the files for the source package
+    files_url = 'http://snapshot.debian.org/mr/package/' + name + '/' \
+        + version + '/srcfiles'
+    files = get_json(files_url)
+    if files is None:
+        logging.info("Ignoring version (because no src files): " + version)
+        files = []
+    dsc = None
+    for file in files:
+        # Get the url describing a file
+        file_url = 'http://snapshot.debian.org/mr/file/' \
+            + file['hash'] + '/info'
+        logging.info("File: " + file_url)
+        info = get_json(file_url)[0]
+        download_url = 'http://snapshot.debian.org/archive/' \
+            + info['archive_name'] + '/' + info['first_seen'] \
+            + info['path'] + '/' + info['name']
+        file_name = os.path.join(dir, info['name'])
+        if os.path.isfile(file_name):
+            logging.info('Already present, not downloading: ' + download_url)
+        else:
+            logging.info('To download: ' + download_url)
+            (name, headers) = urllib.request.urlretrieve(url=download_url,
+                filename=file_name)
+            logging.info('Downloaded: ' + name)
+        if os.path.splitext(file_name)[1] == '.dsc':
+            dsc = file_name
+    return dsc
 
 if __name__ == "__main__":
     args = parse_args()
@@ -133,39 +176,19 @@ if __name__ == "__main__":
     store = '/tmp/debianlag'
     for pkg in conf:
         name = pkg['debsnapshot']['name']
-        git_url = pkg['upstream']
+        upstream_url = pkg['upstream']
+        upstream_dir = os.path.join(store, name + '.git')
+        upstream = techlag.gitlag.Repo(url=upstream_url, dir=upstream_dir,
+                                        after=after, branches=['master'])
         versions_url = 'http://snapshot.debian.org/mr/package/' + name + '/'
         versions = get_json(versions_url)
 
         for item in versions:
             version = item['version']
             logging.info("Version: " + version)
-            files_url = versions_url + version + '/srcfiles'
-            files = get_json(files_url)
-            if files is None:
-                logging.info("Ignoring version (because no src files): " + version)
-                files = []
-            for file in files:
-                file_url = 'http://snapshot.debian.org/mr/file/' \
-                    + file['hash'] + '/info'
-                logging.info("File: " + file_url)
-                info = get_json(file_url)[0]
-#                logging.info(str(info))
-                download_url = 'http://snapshot.debian.org/archive/' \
-                    + info['archive_name'] + '/' + info['first_seen'] \
-                    + info['path'] + '/' + info['name']
-                logging.info("To download: " + download_url)
-        exit()
 
-        releases = pkg['debian']['distros']
-        git_dir = os.path.join(store, name + '.git')
-
-        upstream = techlag.gitlag.Repo(url=git_url, dir=git_dir,
-                                        after=after, branches=['master'])
-
-        for release in releases:
-            dsc_file = techlag.gitlag.get_dpkg(name=name, release=release,
-                                                dir=store)
-            dir = techlag.gitlag.extract_dpkg(dsc_file)
-            lag (name=name+':'+release, upstream=upstream,
+            dsc_file = get_dpkg_snapshot(name=name, version=version, dir=store)
+            logging.info("DSC: " + dsc_file)
+            dir = techlag.gitlag.extract_dpkg(dsc_file, remove=True)
+            lag (name=name+':'+version, upstream=upstream,
                 dir=dir, after=after, steps=args.steps, store=store)

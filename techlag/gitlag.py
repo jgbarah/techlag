@@ -33,6 +33,7 @@ import subprocess
 import logging
 import io
 import datetime
+import shutil
 
 def get_dpkg_data (file_name, pkg_name):
     """Get the urls of the components of a source package in aSources.gz file.
@@ -107,7 +108,7 @@ def get_dpkg(name, release, dir):
         urllib.request.urlretrieve(file_url, file_path)
     return os.path.join(dir, pkg_data['dsc'])
 
-def extract_dpkg(dpkg):
+def extract_dpkg(dpkg, remove=False):
     """Extract Debian package.
 
     Extracts a Debian package, give its dsc file. The other components (the
@@ -115,11 +116,15 @@ def extract_dpkg(dpkg):
     function assumes that dpkg-source is already installed and ready to run.
 
     :param   dpkg: dsc file for a Debian package
+    :param remove; remove the directory if already present
     :returns: name of directory where the package was extracted.
 
     """
 
     dir = os.path.splitext(dpkg)[0]
+    if remove and os.path.exists(dir):
+        logging.info('Removing old directory before extracting: ' + dir)
+        shutil.rmtree(dir)
     logging.info("Extracting Debian pkg in dir: " + dir)
     result = subprocess.call(["dpkg-source", "--extract", dpkg, dir],
                     stdout = subprocess.DEVNULL, stderr = subprocess.DEVNULL)
