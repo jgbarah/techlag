@@ -1,0 +1,14 @@
+[
+  {
+    "upstream": "git://git.savannah.nongnu.org/acl.git",
+    "debsnapshot": {
+      "name": "acl"
+    }
+  },
+  {
+    "upstream": "https://github.com/git/git",
+    "debsnapshot": {
+      "name": "git"
+    }
+  }
+]

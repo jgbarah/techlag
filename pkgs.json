@@ -1,0 +1,9 @@
+[
+  {
+    "upstream": "https://github.com/git/git",
+    "debian": {
+      "name": "git",
+      "distros": [ "wheezy/main", "jessie/main", "stretch/main", "sid/main" ]
+    }
+  }
+]
