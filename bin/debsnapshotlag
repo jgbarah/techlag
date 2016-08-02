@@ -40,6 +40,7 @@ import datetime
 import urllib.request
 import json
 import os.path
+import shelve
 
 def parse_args ():
     """
@@ -92,6 +93,7 @@ def lag (name, upstream, dir, after, steps, store):
     print (result_str.format(name, metrics['diff_commits'],
                             metrics['total_lines'], metrics['total_files']),
         flush=True)
+    return metrics
 
 def get_json(url):
 
@@ -174,21 +176,29 @@ if __name__ == "__main__":
 
     #store = tempfile.TemporaryDirectory().name
     store = '/tmp/debianlag'
-    for pkg in conf:
-        name = pkg['debsnapshot']['name']
-        upstream_url = pkg['upstream']
-        upstream_dir = os.path.join(store, name + '.git')
-        upstream = techlag.gitlag.Repo(url=upstream_url, dir=upstream_dir,
+    with shelve.open('data.shelve') as results:
+        for pkg in conf:
+            name = pkg['debsnapshot']['name']
+            upstream_url = pkg['upstream']
+            upstream_dir = os.path.join(store, name + '.git')
+            upstream = techlag.gitlag.Repo(url=upstream_url, dir=upstream_dir,
                                         after=after, branches=['master'])
-        versions_url = 'http://snapshot.debian.org/mr/package/' + name + '/'
-        versions = get_json(versions_url)
+            versions_url = 'http://snapshot.debian.org/mr/package/' + name + '/'
+            versions = get_json(versions_url)
 
-        for item in versions:
-            version = item['version']
-            logging.info("Version: " + version)
+            for item in versions:
+                version = item['version']
+                logging.info("Version: " + version)
 
-            dsc_file = get_dpkg_snapshot(name=name, version=version, dir=store)
-            logging.info("DSC: " + dsc_file)
-            dir = techlag.gitlag.extract_dpkg(dsc_file, remove=True)
-            lag (name=name+':'+version, upstream=upstream,
-                dir=dir, after=after, steps=args.steps, store=store)
+                package = name+':'+version
+                if package in results:
+                    logging.info('Already computed:' + package + ' ' + str(results[package]))
+                else:
+                    dsc_file = get_dpkg_snapshot(name=name, version=version, dir=store)
+                    if dsc_file is not None:
+                        logging.info("DSC: " + dsc_file)
+                        dir = techlag.gitlag.extract_dpkg(dsc_file, remove=True)
+                        result = lag (name=package, upstream=upstream,
+                                dir=dir, after=after, steps=args.steps, store=store)
+                        results[package] = result
+        print(results)
