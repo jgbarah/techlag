@@ -34,4 +34,4 @@ setup(name="techlag",
       author="Bitergia",
       author_email="jgb@bitergia.com",
       packages=['techlag'],
-      scripts=["bin/gitlag", "bin/debianlag"])
+      scripts=["bin/gitlag", "bin/debianlag", "bin/debsnapshotlag"])

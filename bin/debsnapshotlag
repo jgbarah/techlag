@@ -1,0 +1,171 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+## Copyright (C) 2016 Bitergia
+##
+## This program is free software; you can redistribute it and/or modify
+## it under the terms of the GNU General Public License as published by
+## the Free Software Foundation; either version 3 of the License, or
+## (at your option) any later version.
+##
+## This program is distributed in the hope that it will be useful,
+## but WITHOUT ANY WARRANTY; without even the implied warranty of
+## MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+## GNU General Public License for more details.
+##
+## You should have received a copy of the GNU General Public License
+## along with this program; if not, write to the Free Software
+## Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+##
+## Authors:
+##   Jesus M. Gonzalez-Barahona <jgb@bitergia.com>
+##
+
+description = """
+Compare a collection of Debian packages with upstream
+
+The collection is read from a JSON file, with references to Debian Snapshot.
+
+Example:
+
+debianlag --conf snapshot.json -l info
+
+"""
+
+import argparse
+import logging
+import tempfile
+import techlag.gitlag
+import datetime
+import urllib.request
+import json
+import os.path
+
+def parse_args ():
+    """
+    Parse command line arguments
+
+    """
+    parser = argparse.ArgumentParser(description = description)
+    parser.add_argument("-c", "--conf", required=True,
+                        help = "Git repo to compare")
+    parser.add_argument("--after", type=str,
+                        help = "Consider only commits after date (eg: 2016-01-31)")
+    parser.add_argument("--before", type=str,
+                        help = "Consider only commits before date (eg: 2016-01-31)")
+    parser.add_argument("-l", "--logging", type=str, choices=["info", "debug"],
+                        help = "Logging level for output")
+    parser.add_argument("--logfile", type=str,
+                        help = "Log file")
+    parser.add_argument("--steps", type=int, default=5,
+                        help = "Steps (compare every steps commits, instead of all)")
+    args = parser.parse_args()
+    return args
+
+def lag (name, upstream, dir, after, steps, store):
+    """Compute technical lag for directory with respect to upstream repository.
+
+    :param name:      name of package being computed
+    :type name:       string
+    :param upstream: upstream git repository Metainformation
+    :type upstream:   techlag.gitlago.Repo
+    :param dir:      path to directory (source code derived from upstream repo)
+    :param after:    check only commits after this date, format: %Y-%m-%d
+    :type after:      datetime.datetime
+    :param steps:     do approximation according to these steps
+    :param store:    directory to store checkouts
+
+    """
+
+    up_commit = techlag.gitlag.find_upstream_commit (upstream=upstream, dir=dir,
+                                                    after=after, steps=steps,
+                                                    name=name)
+    logging.info ("{}: most similar upstream checkout is {} (diff: {}, date: {}, hash: {}).".format(
+            name, up_commit['sequence'], up_commit['diff'],
+            up_commit['date'], up_commit['hash']
+            ))
+    checkout = upstream.checkout(commit_no=upstream.last_commit(), store=store)
+    metrics = upstream.compute_diff(commit_no=up_commit['sequence'], dir=checkout)
+    logging.info (metrics)
+    metrics['diff_commits'] = upstream.last_commit() - metrics['commit_seq']
+    result_str = "{}: technical lag to master HEAD {} (commits), {} (lines), {} (files)"
+    print (result_str.format(name, metrics['diff_commits'],
+                            metrics['total_lines'], metrics['total_files']),
+        flush=True)
+
+def get_json(url):
+
+    logging.info("get_json: " + url)
+    try:
+        response = urllib.request.urlopen(url).read()
+    except urllib.error.HTTPError as error:
+        if error.code == 404:
+            return None
+        else:
+            raise
+    data = json.loads(response.decode('utf-8'))
+    return data['result']
+
+
+if __name__ == "__main__":
+    args = parse_args()
+    if args.logging:
+        log_format = '%(levelname)s:%(message)s'
+        if args.logging == "info":
+            level = logging.INFO
+        elif args.logging == "debug":
+            level = logging.DEBUG
+        if args.logfile:
+            logging.basicConfig(format=log_format, level=level,
+                                filename = args.logfile, filemode = "w")
+        else:
+            logging.basicConfig(format=log_format, level=level)
+
+    with open(args.conf) as conf_file:
+        conf = json.load(conf_file)
+
+    if args.after:
+        after = datetime.datetime.strptime(args.after, '%Y-%m-%d')
+    else:
+        after = None
+
+    #store = tempfile.TemporaryDirectory().name
+    store = '/tmp/debianlag'
+    for pkg in conf:
+        name = pkg['debsnapshot']['name']
+        git_url = pkg['upstream']
+        versions_url = 'http://snapshot.debian.org/mr/package/' + name + '/'
+        versions = get_json(versions_url)
+
+        for item in versions:
+            version = item['version']
+            logging.info("Version: " + version)
+            files_url = versions_url + version + '/srcfiles'
+            files = get_json(files_url)
+            if files is None:
+                logging.info("Ignoring version (because no src files): " + version)
+                files = []
+            for file in files:
+                file_url = 'http://snapshot.debian.org/mr/file/' \
+                    + file['hash'] + '/info'
+                logging.info("File: " + file_url)
+                info = get_json(file_url)[0]
+#                logging.info(str(info))
+                download_url = 'http://snapshot.debian.org/archive/' \
+                    + info['archive_name'] + '/' + info['first_seen'] \
+                    + info['path'] + '/' + info['name']
+                logging.info("To download: " + download_url)
+        exit()
+
+        releases = pkg['debian']['distros']
+        git_dir = os.path.join(store, name + '.git')
+
+        upstream = techlag.gitlag.Repo(url=git_url, dir=git_dir,
+                                        after=after, branches=['master'])
+
+        for release in releases:
+            dsc_file = techlag.gitlag.get_dpkg(name=name, release=release,
+                                                dir=store)
+            dir = techlag.gitlag.extract_dpkg(dsc_file)
+            lag (name=name+':'+release, upstream=upstream,
+                dir=dir, after=after, steps=args.steps, store=store)
