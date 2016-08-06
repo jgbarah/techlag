@@ -34,6 +34,7 @@ import logging
 import io
 import datetime
 import shutil
+import shelve
 
 def get_dpkg_data (file_name, pkg_name):
     """Get the urls of the components of a source package in aSources.gz file.
@@ -117,7 +118,7 @@ def extract_dpkg(dpkg, remove=False):
 
     :param   dpkg: dsc file for a Debian package
     :param remove; remove the directory if already present
-    :returns: name of directory where the package was extracted.
+    :returns: name of directory where the package was extracted
 
     """
 
@@ -130,7 +131,7 @@ def extract_dpkg(dpkg, remove=False):
                     stdout = subprocess.DEVNULL, stderr = subprocess.DEVNULL)
     if result != 0:
         logging.info('Error while extracting package for {}'.format(dpkg))
-        exit()
+        raise ChildProcessError('Error extracting package', dpkg)
     return dir
 
 def count_unique(dir, files):
@@ -411,11 +412,13 @@ class Repo:
     :param after:    only considering commits after this date (default None, means all considered)
     :type after:      datetime.datetime
     :param branches: branches to consider (default None, means "all branches")
-    :type branches:   list of str
+    :param    cache: cache for storing commits
+    :type     cache: str
+    :type branches:  list of str
 
     """
 
-    def __init__(self, url, dir, after=None, branches=None):
+    def __init__(self, url, dir, after=None, branches=None, cache=None):
 
         self.url = url
         self.dir = dir
@@ -424,10 +427,25 @@ class Repo:
         else:
             self.after = after
         self.branches = branches
-        parser = perceval.backends.git.Git(uri=self.url, gitpath=self.dir)
-        self.commits = []
-        for item in parser.fetch(from_date = self.after, branches=self.branches):
-            self.commits.append([item['data']['commit'], item['data']['CommitDate']])
+
+        cache_ok = False
+        if cache is not None:
+            cache_data = shelve.open(cache)
+            if 'done' in cache_data and cache_data['done']:
+                cache_ok = True
+        if cache_ok:
+            self.commits = cache_data['commits']
+        else:
+            parser = perceval.backends.git.Git(uri=self.url, gitpath=self.dir)
+            self.commits = []
+            for item in parser.fetch(from_date = self.after, branches=self.branches):
+                self.commits.append([item['data']['commit'], item['data']['CommitDate']])
+        if cache is not None:
+            if not cache_ok:
+                cache_data['commits'] = self.commits
+                cache_data['done'] = True
+            cache_data.close()
+
 
     def get_commits (self):
         """Get list of commits.
