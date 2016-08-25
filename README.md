@@ -8,7 +8,29 @@ We can assume that source packages in software compilations (downstream packages
 
 For estimating the most likely upstream commit for a given downstream package, we can compare each upstream checkout (for all its commits) to the downstream package. To simplify things a bit, we can assume that we're interested in finding this commit in the upstream master branch. To make the search more efficient, the estimation will be done by successive approximations,
 
-### Examples
+
+## Installation
+
+Ensure Python 3.x (at least 3.4) is installed. The debian-source utility is needed too for programs dealing with Debian packages. In Debian systems, you can install it by:
+
+```
+apt-get install debian-dev
+```
+
+Then, install the Python dependencies. Next instructions are for using virtualenv and pip, but they can be easily adapted to other procedures:
+
+```
+$ virtualenv -p /usr/bin/python3 ~/venv-techlag
+$ source ~/venb-techlag/bin/activate
+(venv-techlag) $ git clone http://github.com/jgbarah/techlag.git
+(venv-techlag) $ cd techlag
+(venv-techlag) $ pip install -r requirements.txt
+(venv-techlag) $ python3 setup.sh install
+```
+
+After this, the programs and libraries provided by techlag are installed in the virtualenv. To work with them, remember to activate the envirionment in the shell where you intend to run the programs or use the libraries.
+
+## Examples
 
 Some examples on how to run the script for finding the most likely upstream commit:
 
@@ -55,4 +77,11 @@ INFO:CSV,git:stretch/main,     8660,Fri Feb 23 00:57:12 2007 -0800,   469812,  1
 INFO:CSV,git:stretch/main,     8662,Fri Feb 23 00:57:12 2007 -0800,   469853,  1984,   139009,    50709
 INFO:CSV,git:stretch/main,     8664,Fri Feb 23 00:57:12 2007 -0800,   469974,  1984,   139009,    50830
 ...
+```
+
+## Checking technical lag for Debian Snapshot pacakges
+
+```
+debsnapshotlag -c snapshot.json --store debsnapshot-store -l info \
+   > debsnapshot.log 2> debsnapshot-err.log
 ```
