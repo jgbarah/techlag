@@ -576,15 +576,16 @@ def find_upstream_commit (upstream, dir, after, steps, name=""):
         'hash': min_commit[0],
         'date': min_commit[1]
     }
-    csv_header = "CSV,{name},commit_seq,date,total_lines," \
+    csv_header = "CSV,{name},commit_seq,date,hash,total_lines," \
         + "total_files,added_lines,removed_lines"
-    csv_string = "CSV,{name},{commit_seq:9d},{date},{total_lines:9d},{total_files:6d}," \
+    csv_string = "CSV,{name},{commit_seq:9d},{date},{hash},{total_lines:9d},{total_files:6d}," \
         + "{added_lines:9d},{removed_lines:9d}"
     logging.info(csv_header.format(name=name))
     for m in metrics.metrics_items():
         logging.info(csv_string.format(name=name,
                                         commit_seq=m["commit_seq"],
                                         date=m["date"],
+                                        hash=m['commit'][0:7],
                                         total_lines=m["total_lines"],
                                         total_files=m["total_files"],
                                         added_lines=m["added_lines"],
