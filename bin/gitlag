@@ -133,4 +133,4 @@ if __name__ == "__main__":
                 dir=dir, after=after, steps=args.steps, store=store.name)
     else:
         dir = args.pkg
-        lag (upstream=upstream, dir=dir, after=after, steps=args.steps, store=store.name)
+        lag (name=dir, upstream=upstream, dir=dir, after=after, steps=args.steps, store=store.name)
