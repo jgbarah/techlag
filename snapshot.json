@@ -6,6 +6,24 @@
     }
   },
   {
+    "upstream": "https://github.com/docker/compose.git",
+    "debsnapshot": {
+      "name": "docker-compose"
+    }
+  },
+  {
+    "upstream": "git://git.kernel.org/pub/scm/bluetooth/bluez.git",
+    "debsnapshot": {
+      "name": "bluez"
+    }
+  },
+  {
+    "upstream": "git://git.savannah.gnu.org/bash.git",
+    "debsnapshot": {
+      "name": "bash"
+    }
+  },
+  {
     "upstream": "https://github.com/git/git",
     "debsnapshot": {
       "name": "git"

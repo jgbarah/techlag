@@ -60,6 +60,8 @@ def parse_args ():
                         help = "Log file")
     parser.add_argument("--steps", type=int, default=5,
                         help = "Steps (compare every steps commits, instead of all)")
+    parser.add_argument("--store", type=str,
+                        help = "Directory for storage of temporary information")
     args = parser.parse_args()
     return args
 
@@ -174,8 +176,13 @@ if __name__ == "__main__":
     else:
         after = None
 
-    #store = tempfile.TemporaryDirectory().name
-    store = '/tmp/debianlag'
+    if args.store:
+        store = args.store
+    else:
+        #store = tempfile.TemporaryDirectory().name
+        store = '/tmp/debianlag'
+    if not os.path.isdir(store):
+        os.makedirs(store)
     with shelve.open('data.shelve') as results:
         if 'done' not in results:
             results['done'] = {}
