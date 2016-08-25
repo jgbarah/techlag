@@ -21,3 +21,4 @@ sphinx-autobuild
 sphinx-rtd-theme
 tornado
 watchdog
+git+https://github.com/grimoirelab/perceval.git#egg=perceval
