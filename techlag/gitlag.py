@@ -151,8 +151,8 @@ def count_unique(dir, files):
     for file in files:
         name = os.path.join(dir, file)
         if os.path.isfile(name):
-            num_lines += sum(1 for line in open(name, encoding="ascii",
-                                                errors="surrogateescape"))
+            with open(name, encoding="ascii", errors="surrogateescape") as f:
+                num_lines += sum(1 for line in f)
             logging.debug("Unique file: %s (lines: %d)" % (name, num_lines))
     logging.debug ("Unique files in dir %s: files: %d, lines: %d"
         % (dir, num_files, num_lines))
@@ -169,19 +169,25 @@ def compare_files(file_left, file_right):
 
     added = 0
     removed = 0
+    equal = 0
     with open(file_left,'r', encoding="ascii", errors="surrogateescape") as left, \
         open(file_right,'r', encoding="ascii", errors="surrogateescape") as right:
-        diff = difflib.ndiff(left.readlines(), right.readlines())
+        differ = difflib.Differ()
+        diff = differ.compare(left.readlines(), right.readlines())
+
         for line in diff:
+#            print("LINE: ", line)
             if line.startswith('+'):
                 added += 1
             elif line.startswith('-'):
                 removed += 1
+            elif line.startswith(' '):
+                equal += 1
     if (added + removed) > 0:
-        diff = 1
+        different = 1
     else:
-        diff = 0
-    return (diff, added, removed)
+        different = 0
+    return (different, added, removed, equal)
 
 def count_common(dir_left, dir_right, files):
     """Count common files.
@@ -198,48 +204,63 @@ def count_common(dir_left, dir_right, files):
 
     added = 0
     removed = 0
+    equal = 0
     diff_files = 0
     for file in files:
         name_left = os.path.join(dir_left, file)
         name_right = os.path.join(dir_right, file)
-        (diff, added_l, removed_l) = compare_files(name_left, name_right)
+        (diff, added_l, removed_l, equal_l) = compare_files(name_left, name_right)
         diff_files += diff
         added += added_l
         removed += removed_l
-    return (diff_files, added, removed)
+        equal += equal_l
+    return (diff_files, added, removed, equal)
 
-def compare_dirs(dcmp):
+def compare_dirs(dcmp, metrics=['diff_files']):
     """Compare two directories given their filecmp.dircmp object.
 
-    Produces as a result a dictionary with metrcis about the comparison:
-     * left_files: number of files unique in left directory
-     * right_files: number of files unique in right directory
-     * diff_files: number of files present in both directories, but different
-     * left_lines: number of lines for files unique in left directory
-     * right_lines: number of lines for files unique in left directory
-     * added_lines: number of lines added in files present in both directories
-     * removed_lines: number of lines removed in files present in both directories
+    Produces as a result a dictionary with metrcis about the comparison.
+    Depending on the values in the metrics parameter, several metrics
+    are produced:
+     * "diff_files":
+        * left_files: number of files unique in left directory
+        * right_files: number of files unique in right directory
+        * left_lines: number of lines for files unique in left directory
+        * right_lines: number of lines for files unique in left directory
+    * "same_files":
+        * same_files: number of files common (equal) in both directories
+        * same_lines: number of lines common in files present in both directories
+    * Always:
+        * diff_files: number of files present in both directories, but different
+        * added_lines: number of lines added in files different in both directories
+        * removed_lines: number of lines removed in files different in both directories
+        * equal_lines: number of lines equal in files different in both directories
 
-    added_lines, removed_lines refer only to files counted as diff_files
+    added_lines, removed_lines, equal_lines refer only to files counted as diff_files
+    common_lines refer to common_files
 
     :param dcmp: filecmp.dircmp object for directories to compare
+    :param metrics: metrics to produce (list)
     :returns: dictionary with differences
 
     """
 
     m = {}
-    (m["left_files"], m["left_lines"]) \
-        = count_unique(dir = dcmp.left, files = dcmp.left_only)
-    (m["right_files"], m["right_lines"]) \
-        = count_unique(dir = dcmp.right, files = dcmp.right_only)
-    (m["diff_files"], m["added_lines"], m["removed_lines"]) \
-        = count_common(dcmp.left, dcmp.right, dcmp.common_files)
+    if 'diff_files' in metrics:
+        (m["left_files"], m["left_lines"]) \
+            = count_unique(dir = dcmp.left, files = dcmp.left_only)
+        (m["right_files"], m["right_lines"]) \
+            = count_unique(dir = dcmp.right, files = dcmp.right_only)
+    if 'same_files' in metrics:
+        (m["same_files"], m["same_lines"]) \
+            = count_unique(dir = dcmp.right, files = dcmp.same_files)
+    (m['diff_files'], m['added_lines'], m['removed_lines'], m['equal_lines']) \
+        = count_common(dcmp.left, dcmp.right, dcmp.diff_files)
     for sub_dcmp in dcmp.subdirs.values():
-        m_subdir = compare_dirs(sub_dcmp)
+        m_subdir = compare_dirs(sub_dcmp, metrics)
         for metric, value in m_subdir.items():
             m[metric] += value
     return m
-
 
 class Metrics:
     """Data structure for dealing with metrics related to commits.
@@ -558,7 +579,7 @@ def find_upstream_commit (upstream, dir, after, steps, name=""):
     step = -(-metrics.num_commits() // steps)
     while step >= 1:
         metrics.compute_range (left, right, step)
-        (left, right, min_seq, min_value) = metrics.min_range(length=3, metric="total_lines")
+        (left, right, min_seq, min_value) = metrics.min_range(length=3, metric="common_lines")
         logging.info("Step: %d, left: %d, right: %d, min. seq: %d, min. value: %d."
                     % (step, left, right, min_seq, min_value))
         if step == 1:
@@ -577,9 +598,9 @@ def find_upstream_commit (upstream, dir, after, steps, name=""):
         'date': min_commit[1]
     }
     csv_header = "CSV,{name},commit_seq,date,hash,total_lines," \
-        + "total_files,added_lines,removed_lines"
+        + "total_files,added_lines,removed_lines,left_lines,right_lines"
     csv_string = "CSV,{name},{commit_seq:9d},{date},{hash},{total_lines:9d},{total_files:6d}," \
-        + "{added_lines:9d},{removed_lines:9d}"
+        + "{added_lines:9d},{removed_lines:9d},{left_lines:9d},{right_lines:9d}"
     logging.info(csv_header.format(name=name))
     for m in metrics.metrics_items():
         logging.info(csv_string.format(name=name,
@@ -589,5 +610,7 @@ def find_upstream_commit (upstream, dir, after, steps, name=""):
                                         total_lines=m["total_lines"],
                                         total_files=m["total_files"],
                                         added_lines=m["added_lines"],
-                                        removed_lines=m["removed_lines"]))
+                                        removed_lines=m["removed_lines"],
+                                        left_lines=m["left_lines"],
+                                        right_lines=m["right_lines"]))
     return (most_similar)
