@@ -137,14 +137,17 @@ def extract_dpkg(dpkg, remove=False):
 class BaseDir():
     """Base directory to compare with others.
 
+    For an explanation of the metrics instantiation parameter, read
+    the comments for the compare function.
+
     :param name: name (full path) of directory to compare
     :param metrics: metrics to produce when comparing (list)
 
     """
 
-    def __init__(self, name, metrics=['diff_files']):
+    def __init__(self, name, metrics=['diff']):
         for metric in metrics:
-            assert metric in ['diff_files', 'same_files']
+            assert metric in ['diff', 'same']
         self.dir = name
         self.metrics = metrics
         # Cache for metrics of unique files in self.dir
@@ -258,13 +261,13 @@ class BaseDir():
         """
 
         m = {}
-        if 'diff_files' in self.metrics:
+        if 'diff' in self.metrics:
             (m["left_files"], m["left_lines"]) \
                 = self._count_unique(dir = dcmp.left, files = dcmp.left_only,
                                     use_cache=True)
             (m["right_files"], m["right_lines"]) \
                 = self._count_unique(dir = dcmp.right, files = dcmp.right_only)
-        if 'same_files' in self.metrics:
+        if 'same' in self.metrics:
             (m["same_files"], m["same_lines"]) \
                 = self._count_unique(dir = dcmp.left, files = dcmp.same_files,
                                     use_cache=True)
@@ -282,14 +285,18 @@ class BaseDir():
         Depending on the values in the metrics parameter (provided when
         instantiating the class), several metrics are produced:
 
-        * "diff_files":
+        * "diff":
             * left_files: number of files unique in left directory
             * right_files: number of files unique in right directory
             * left_lines: number of lines for files unique in left directory
             * right_lines: number of lines for files unique in left directory
-        * "same_files":
+            * different_files: summary metric, (left+right)/2+diff
+            * different_lines: summary metric, (left+right+added+removed)/2
+        * "same":
             * same_files: number of files common (equal) in both directories
             * same_lines: number of lines common in files present in both directories
+            * common_files: summary metric, (same_files)
+            * common_lines: summary_metric, (same_lines+equal_lines)
         * Always:
             * diff_files: number of files present in both directories, but different
             * added_lines: number of lines added in files different in both directories
@@ -297,7 +304,7 @@ class BaseDir():
             * equal_lines: number of lines equal in files different in both directories
 
         added_lines, removed_lines, equal_lines refer only to files counted as diff_files
-        common_lines refer to common_files
+        same_lines refer to common_files
 
         :param dir: name (full path) of directory to compare
         :returns: dictionary with differences
@@ -306,6 +313,14 @@ class BaseDir():
 
         dcmp = filecmp.dircmp(self.dir, dir)
         m = self._compare_dirs(dcmp)
+        if 'diff' in self.metrics:
+            m["different_files"] = (m["left_files"] + m["right_files"]) // 2 \
+                    + m["diff_files"]
+            m["different_lines"] = (m["left_lines"] + m["right_lines"] \
+            + m["added_lines"] + m["removed_lines"]) // 2
+        if 'same' in self.metrics:
+            m['common_files'] = m['same_files']
+            m['common_lines'] = m['same_lines'] + m['equal_lines']
         return m
 
 class Metrics:
@@ -360,40 +375,39 @@ class Metrics:
 
         return len(self.commits)
 
-    def compute_metrics(self, commit_no):
+    def compute_metrics(self, commit_no, metrics=['diff']):
         """Compute metrics for commmit number (ordered as from git log).
+
+        For an explanation of the metrics instantiation parameter, read
+        the comments for the BaseDir.compare function.
 
         Checks out the corresponding commit in the git repository, and
         compute the metrics for its difference with the given package.
-        The returned metrics are those produced by compare_dirs plus:
+        The returned metrics are those produced by BaseDir.compare plus:
          * commit: hash for the commit
          * date: commit date for the commit (as a string)
 
         :param commits: list of all commits
         :param commit_no: commit number (starting in 0)
+        :param metrics: metrics to produce when comparing (list)
         :returns: dictionary with metrics
         """
+
+        for metric in metrics:
+            assert metric in ['diff', 'same']
 
         commit = self.commits[commit_no]
         subprocess.call(["git", "-C", self.repo.dir, "checkout", commit[0]],
                         stdout = subprocess.DEVNULL, stderr = subprocess.DEVNULL)
-        dircmp = BaseDir(self.dir)
+        dircmp = BaseDir(self.dir, metrics)
         m = dircmp.compare(self.repo.dir)
-#        dcmp = filecmp.dircmp(self.repo.dir, self.dir)
-#        m = compare_dirs(dcmp)
-        logging.debug ("Commit %s. Files: %d, %d, %d, lines: %d, %d, %d, %d)"
-            % (commit[0], m["left_files"], m["right_files"], m["diff_files"],
-            m["left_lines"], m["right_lines"],
-            m["added_lines"], m["removed_lines"]))
-        m["total_files"] = m["left_files"] + m["right_files"] + m["diff_files"]
-        m["total_lines"] = m["left_lines"] + m["right_lines"] \
-            + m["added_lines"] + m["removed_lines"]
+        logging.debug ("Commit %s. Metrics: %s" % (str(commit), str(m)))
         m["commit_seq"] = commit_no
         m["commit"] = commit[0]
         m["date"] = commit[1]
         return m
 
-    def compute_range (self, first, last, step):
+    def compute_range (self, first, last, step, metrics=['diff']):
         """Compute metrics for a range of commits.
 
         Compute metrics for a range of commits, but only for those in the
@@ -409,24 +423,30 @@ class Metrics:
         for seq_no in list(range(first, last, step)) + [last]:
             logging.info("Computing metrics for %d." % seq_no)
             if seq_no not in self.metrics:
-                m = self.compute_metrics(seq_no)
+                m = self.compute_metrics(seq_no, metrics)
                 logging.debug(m)
                 self.metrics[seq_no] = m
 
-    def min_range (self, length, metric):
+    def closest_range (self, length, metric='diff',closest_fn=min):
         """Find range of minimum values.
 
-        Returns a range of minimum values. The range will have at least
+        Returns a range of closes values. The range will have at least
         length values. In fact, a tuple with the lowest sequence number, and
         the maximum sequence number for the range, the sequence number for
-        the minimum value, and the minimum value.
+        the closest value, and the closest value.
 
         :param length: length (number of values) of the range
         :param metric: name of the metric to consider for comparison
-        :returns: tuple (min, max, min_index, min_value)
+        :param closest_fn: function to use to find the closest value (min, max)
+        :returns: tuple (min, max, closest_index, closest_value)
 
         """
 
+        assert closest_fn in [min, max]
+        if closest_fn is min:
+            farthest_fn = max
+        else:
+            farthest_fn = min
         values = []
         indexes = []
         seq_commits = sorted(self.metrics)
@@ -437,20 +457,21 @@ class Metrics:
                 values.append(value)
                 indexes.append(seq_no)
             else:
-                # Only worry if largest in lists is larger than value
-                largest = max(values)
-                if value < largest:
-                    # Largest is larger. Remove it from lists
-                    largest_index = values.index(largest)
-                    values.pop(largest_index)
-                    indexes.pop(largest_index)
+                # Only worry if valus is closer than farthest in lists
+                furthest = furthest_fn(values)
+#                largest = max(values)
+                if closer_fn([value, furthest]) == value:
+                    # Value is closer than furthest. Remove it from lists
+                    farthest_index = values.index(farthest)
+                    values.pop(farthest_index)
+                    indexes.pop(farthest_index)
                     # And now add value to the right
                     values.append(value)
                     indexes.append(seq_no)
             logging.debug("values: " + str(values))
             logging.debug("indexes " + str(indexes))
-        min_value = min(values)
-        min_index = indexes[values.index(min_value)]
+        closest_value = closest_fn(values)
+        closest_index = indexes[values.index(closest_value)]
         # Add next computed checkout on the left and on the right, just in case we're
         # on the edge of the checkouts we have computed
         if indexes[0] > seq_commits[0]:
@@ -463,7 +484,7 @@ class Metrics:
             values.append(self.metrics[right_seq][metric])
         logging.info("values: " + str(values))
         logging.info("indexes " + str(indexes))
-        return (indexes[0], indexes[-1], min_index, min_value)
+        return (indexes[0], indexes[-1], closest_index, closest_value)
 
     def metrics_items (self):
         """Iterator returning metrics for all computed commits.
@@ -471,7 +492,6 @@ class Metrics:
         """
 
         return [self.metrics[seq_no] for seq_no in sorted(self.metrics)]
-        #return self.metrics.values()
 
 class Repo:
     """Metainformation about a git repository.
@@ -578,8 +598,6 @@ class Repo:
 
         dircmp = BaseDir(self.dir)
         m = dircmp.compare(dir)
-#        dcmp = filecmp.dircmp(self.dir, dir)
-#        m = compare_dirs(dcmp)
 
         logging.debug ("Commit %s. Files: %d, %d, %d, lines: %d, %d, %d, %d)"
             % (commit[0], m["left_files"], m["right_files"], m["diff_files"],
@@ -594,7 +612,7 @@ class Repo:
         return m
 
 
-def find_upstream_commit (upstream, dir, after, steps, name=""):
+def find_upstream_commit (upstream, dir, steps=10, name=""):
     """Find the most likely upstream commit.
 
     Compares a source code directory with the checkouts from its upstream
@@ -624,15 +642,19 @@ def find_upstream_commit (upstream, dir, after, steps, name=""):
     logging.info("%d commits parsed." % metrics.num_commits())
 
     left = 0
-    right = metrics.num_commits()-1
+    right = metrics.num_commits() - 1
     # Next calculates the ceiling integer division
     # Needed because we want eg. 1/3 to be 1
     step = -(-metrics.num_commits() // steps)
+    metrics_kinds = ['same']
+    closest_fn=max
     while step >= 1:
-        metrics.compute_range (left, right, step)
-        (left, right, min_seq, min_value) = metrics.min_range(length=3, metric="common_lines")
-        logging.info("Step: %d, left: %d, right: %d, min. seq: %d, min. value: %d."
-                    % (step, left, right, min_seq, min_value))
+        metrics.compute_range (left, right, step, metrics=metrics_kinds)
+        (left, right, closest_seq, closest_value) \
+            = metrics.closest_range(length=3, metric="common_lines",
+                                closest_fn=closest_fn)
+        logging.info("Step: %d, left: %d, right: %d, closest seq: %d, closest value: %d."
+                    % (step, left, right, closest_seq, closest_value))
         if step == 1:
             step = 0
         else:
@@ -641,27 +663,32 @@ def find_upstream_commit (upstream, dir, after, steps, name=""):
                 step = step - 1
             else:
                 step = candidate_step
-    min_commit = metrics.get_commit(min_seq)
+    closest_commit = metrics.get_commit(closest_seq)
     most_similar = {
-        'sequence': min_seq,
-        'diff': min_value,
-        'hash': min_commit[0],
-        'date': min_commit[1]
+        'sequence': closest_seq,
+        'diff': closest_value,
+        'hash': closest_commit[0],
+        'date': closest_commit[1]
     }
-    csv_header = "CSV,{name},commit_seq,date,hash,total_lines," \
-        + "total_files,added_lines,removed_lines,left_lines,right_lines"
-    csv_string = "CSV,{name},{commit_seq:9d},{date},{hash},{total_lines:9d},{total_files:6d}," \
-        + "{added_lines:9d},{removed_lines:9d},{left_lines:9d},{right_lines:9d}"
+
+    csv_header = "CSV,name,"
+    csv_string = "CSV,{name},"
+    if 'same' in metrics_kinds:
+        csv_header += 'common_files, common_lines, same_files, same_lines'
+        csv_string += '{common_files:6d}, {common_lines:9d}, ' \
+            + '{same_files:6d}, {same_lines:9d}'
+    if 'diff' in metrics_kinds:
+        csv_header += 'different_files, different_lines, ' \
+            + 'left_files, left_lines, right_files, right_lines'
+        csv_string += '{different_files:6d}, {different_lines:9d}, ' \
+            + '{left_files:6d}, {left_lines:9d}, ' \
+            + '{right_files:6d}, {right_lines:9d}'
+    csv_header += 'diff_files, added_lines, removed_lines, equal_lines'
+    csv_string += '{diff_files:6d}, ' \
+        + '{added_lines:9d}, {removed_lines:9d}, {equal_lines:9d}'
+
     logging.info(csv_header.format(name=name))
     for m in metrics.metrics_items():
-        logging.info(csv_string.format(name=name,
-                                        commit_seq=m["commit_seq"],
-                                        date=m["date"],
-                                        hash=m['commit'][0:7],
-                                        total_lines=m["total_lines"],
-                                        total_files=m["total_files"],
-                                        added_lines=m["added_lines"],
-                                        removed_lines=m["removed_lines"],
-                                        left_lines=m["left_lines"],
-                                        right_lines=m["right_lines"]))
+        m['hash']=m['commit'][0:7]
+        logging.info(csv_string.format(name=name, **m))
     return (most_similar)

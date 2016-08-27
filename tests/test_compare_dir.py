@@ -43,6 +43,7 @@ class TestCompareDir(unittest.TestCase):
         cls.tmp_path = tempfile.mkdtemp(prefix='gitlag_')
         cls.dir1 = os.path.join(cls.tmp_path, 'dirs', 'dir1')
         cls.dir2 = os.path.join(cls.tmp_path, 'dirs', 'dir2')
+        cls.dir3 = os.path.join(cls.tmp_path, 'dirs', 'dir3')
 
         subprocess.check_call(['tar', '-xzf', 'data/dirs.tar.gz',
                                '-C', cls.tmp_path])
@@ -61,9 +62,13 @@ class TestCompareDir(unittest.TestCase):
         result_diff = {'left_files': 3,
                     'left_lines': 9,
                     'right_files': 3,
-                    'right_lines': 9}
+                    'right_lines': 9,
+                    'different_files': 4,
+                    'different_lines': 13,}
         result_same = {'same_files': 1,
-                    'same_lines': 8}
+                    'same_lines': 8,
+                    'common_files': 1,
+                    'common_lines': 13}
 
         result = result_always.copy()
         result.update(result_diff)
@@ -72,21 +77,20 @@ class TestCompareDir(unittest.TestCase):
         self.assertEqual(m, result)
 
         # Commpare dirs with explicit metrics, which are default metrics
-        dircmp = techlag.gitlag.BaseDir(self.dir1, metrics=['diff_files'])
+        dircmp = techlag.gitlag.BaseDir(self.dir1, metrics=['diff'])
         m = dircmp.compare(self.dir2)
         self.assertEqual(m, result)
 
         # Compare dirs with explicit metrics ('same_files')
         result = result_always.copy()
         result.update(result_same)
-        dircmp = techlag.gitlag.BaseDir(self.dir1, metrics=['same_files'])
+        dircmp = techlag.gitlag.BaseDir(self.dir1, metrics=['same'])
         m = dircmp.compare(self.dir2)
         self.assertEqual(m, result)
 
-        # Compare dirs with explicit metrics ('saame_files', 'diff_files')
+        # Compare dirs with explicit metrics ('saame', 'diff')
         result.update(result_diff)
-        dircmp = techlag.gitlag.BaseDir(self.dir1,
-                                        metrics=['same_files', 'diff_files'])
+        dircmp = techlag.gitlag.BaseDir(self.dir1, metrics=['same', 'diff'])
         m = dircmp.compare(self.dir2)
         self.assertEqual(m, result)
 
@@ -98,14 +102,13 @@ class TestCompareDir(unittest.TestCase):
         # Default for metrics
         dircmp = techlag.gitlag.BaseDir(self.dir1)
         # One metric
-        dircmp = techlag.gitlag.BaseDir(self.dir1, metrics=['diff_files'])
+        dircmp = techlag.gitlag.BaseDir(self.dir1, metrics=['diff'])
         # Two metrics
-        dircmp = techlag.gitlag.BaseDir(self.dir1,
-                                        metrics=['same_files', 'diff_files'])
+        dircmp = techlag.gitlag.BaseDir(self.dir1, metrics=['same', 'diff'])
         # One metric of two is wrong, assertion should trigger
         with self.assertRaises(AssertionError) as context:
             dircmp = techlag.gitlag.BaseDir(self.dir1,
-                                            metrics=['diff_files', 'some_files'])
+                                            metrics=['diff', 'some'])
 
     def test_basedir_cache(self):
         """Test that the cache for file lines in BaseDir is working
@@ -122,10 +125,12 @@ class TestCompareDir(unittest.TestCase):
             result[self.dir1 + key] = value
 
         dircmp = techlag.gitlag.BaseDir(self.dir1,
-                                        metrics=['same_files', 'diff_files'])
+                                        metrics=['same', 'diff'])
         dircmp.compare(self.dir2)
         self.assertEqual(dircmp.lines, result)
         dircmp.compare(self.dir2)
+        self.assertEqual(dircmp.lines, result)
+        dircmp.compare(self.dir3)
         self.assertEqual(dircmp.lines, result)
 
 if __name__ == "__main__":
