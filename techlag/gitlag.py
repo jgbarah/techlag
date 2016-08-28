@@ -134,6 +134,178 @@ def extract_dpkg(dpkg, remove=False):
         raise ChildProcessError('Error extracting package', dpkg)
     return dir
 
+class Repo:
+    """Metainformation about a git repository.
+
+    This class abstracts a git upstream reposory, by using Perceval.
+
+    Upon instantiation of and object in this class, the specified
+    upstream repository is cloned in the specified local directory.
+    Then, Perceval is used again to obtain the list of
+    its commits. The object offers a method for checking out any of
+    those commits as well, and copying the resulting checkout to
+    a certain 'storage'directory.
+
+    Only commits authored since a certain date will be considered,
+    by specifying the after parameter when instantiating. By default (None),
+    all commits are considered.
+
+    By default, only commits from master branch are considered, but
+    a list of branches to consider can be provided when instantiating.
+
+    Objects in this class may maintain as well a file cache, using Shelve,
+    with the list of commits, so that there is no need to recompute them if
+    the cache can be read. This is only done if the cache argument is
+    provided when instantiating an object. The cache is maintained so that
+    either the complete list of commits is in it, or no commit is available
+    at all. This is so because it only makes sense to maintain the cache
+    if there is no need to parse git log again.
+
+    Each object maintains the list of commits for its repository. For
+    each commit, a list [hash, commit_date] is maintanined. The order is
+    the one provided by Perceval, which corresponds to the order by
+    git log, in reverse order.
+
+    :param url:      url of upstream git repository
+    :type url:       string
+    :param dir:      path of local directory for cloning the git repository
+    :type dir:       string
+    :param after:    consider only commits after this date
+    :type after:     datetime.datetime
+    :param branches: branches to consider (default None, means "all branches")
+    :type branches:  list of str
+    :param cache:    path for the cache for storing commits
+    :type cache:     str
+
+    """
+
+    def __init__(self, url, dir, after=None, branches=["master"], cache=None):
+
+        self.url = url
+        self.dir = dir
+        if after is None:
+            self.after = datetime.datetime(1970, 1, 1, 0, 0)
+        else:
+            self.after = after
+        self.branches = branches
+
+        # Get the git repository always, to be able of checking out later,
+        # if needed
+        parser = perceval.backends.git.Git(uri=self.url, gitpath=self.dir)
+
+        # The cache is ok if the calue for 'done' is True
+        cache_ok = False
+        if cache is not None:
+            cache_data = shelve.open(cache)
+            if 'done' in cache_data and cache_data['done']:
+                cache_ok = True
+
+        # Get commits from the cache (if ok) or from the repo (via Perceval)
+        if cache_ok:
+            self.commits = cache_data['commits']
+        else:
+            self.commits = []
+            commits_fetcher = parser.fetch(from_date = self.after,
+                                            branches=self.branches)
+            for item in commits_fetcher:
+                self.commits.append([item['data']['commit'],
+                                    item['data']['CommitDate']])
+
+        # Store data in the cache, if needed
+        if cache is not None:
+            if not cache_ok:
+                cache_data['commits'] = self.commits
+                cache_data['done'] = True
+            cache_data.close()
+
+
+    def get_commits (self):
+        """Get list of commits.
+
+        Get the list of commits managed by objects in this class.
+
+        :returns:         list of commits (each commit is a list [hash, date])
+
+        """
+
+        return self.commits
+
+    def last_commit (self):
+        """Get last commit number.
+
+        Get the last commit in the list maintained by objects in this class.
+        This sould correspond to the last commit produced by git log, in
+        reverse orther (that is, the first commit produced by git log).
+
+        """
+
+        return len(self.commits) - 1
+
+    def checkout(self, commit_no, store=None):
+        """Checkout the version of the repository corresponding to commit_no.
+
+        If store is None, just checkout the commit in the repo, in the
+        directory specified when instantiating the object, but don't
+        copy it to a directory.
+
+        If store is not None, it will be the directory for
+        storage, where a subdirectory will be produced, with the hash as name,
+        to copy the checkout.
+
+        If specified, store should exist. If there is already a checkout for
+        this commit in store, just checkout in the repository, but don't copy.
+
+        :param commit_no: commit number to check out
+        :param store:     directory to copy the checkout to (default: None)
+        :returns:         path of directory with the checkout, or None if none
+
+        """
+
+        hash = self.commits[commit_no][0]
+        subprocess.call(["git", "-C", self.dir, "checkout", hash],
+                        stdout = subprocess.DEVNULL, stderr = subprocess.DEVNULL)
+        if store is not None:
+            checkout_dir = os.path.join(store, hash)
+            if not os.path.isdir(checkout_dir):
+                shutil.copytree(self.dir, checkout_dir)
+            return checkout_dir
+        else:
+            return None
+
+    # def compute_diff(self, commit_no, dir, metrics=['diff']):
+    #     """Compute diff metrics between the repo checkout for commit_no and dir.
+    #
+    #     Checks out commit_no (as per git log order) in the git repository, and
+    #     computes the metrics for its difference with the given directory.
+    #     The returned metrics are those produced by compare_dirs plus:
+    #      * commit: hash for the commit
+    #      * date: commit date for the commit (as a string)
+    #
+    #     :param commit_no: commit number to checkout
+    #     :param dir:       directory to compare
+    #     :param metrics:   metrics to produce when comparing (list)
+    #     :returns:         dictionary with metrics
+    #
+    #     """
+    #
+    #     commit = self.commits[commit_no]
+    #     self.checkout(commit_no)
+    #
+    #     dircmp = BaseDir(self.dir, metrics)
+    #     m = dircmp.compare(dir)
+    #
+    #     logging.debug ("Commit %s. Files: %d, %d, %d, lines: %d, %d, %d, %d)"
+    #         % (commit[0], m["left_files"], m["right_files"], m["diff_files"],
+    #         m["left_lines"], m["right_lines"],
+    #         m["added_lines"], m["removed_lines"]))
+    #     m["total_files"] = m["left_files"] + m["right_files"] + m["diff_files"]
+    #     m["total_lines"] = m["left_lines"] + m["right_lines"] \
+    #         + m["added_lines"] + m["removed_lines"]
+    #     m["commit_seq"] = commit_no
+    #     m["commit"] = commit[0]
+    #     m["date"] = commit[1]
+    #     return m
+
 class BaseDir():
     """Base directory to compare with others.
 
@@ -632,175 +804,3 @@ class Metrics:
             m['hash']=m['commit'][0:7]
             logging.info(csv_string.format(name=name, **m))
         return (most_similar)
-
-class Repo:
-    """Metainformation about a git repository.
-
-    This class abstracts a git upstream reposory, by using Perceval.
-
-    Upon instantiation of and object in this class, the specified
-    upstream repository is cloned in the specified local directory.
-    Then, Perceval is used again to obtain the list of
-    its commits. The object offers a method for checking out any of
-    those commits as well, and copying the resulting checkout to
-    a certain 'storage'directory.
-
-    Only commits authored since a certain date will be considered,
-    by specifying the after parameter when instantiating. By default (None),
-    all commits are considered.
-
-    By default, only commits from master branch are considered, but
-    a list of branches to consider can be provided when instantiating.
-
-    Objects in this class may maintain as well a file cache, using Shelve,
-    with the list of commits, so that there is no need to recompute them if
-    the cache can be read. This is only done if the cache argument is
-    provided when instantiating an object. The cache is maintained so that
-    either the complete list of commits is in it, or no commit is available
-    at all. This is so because it only makes sense to maintain the cache
-    if there is no need to parse git log again.
-
-    Each object maintains the list of commits for its repository. For
-    each commit, a list [hash, commit_date] is maintanined. The order is
-    the one provided by Perceval, which corresponds to the order by
-    git log, in reverse order.
-
-    :param url:      url of upstream git repository
-    :type url:       string
-    :param dir:      path of local directory for cloning the git repository
-    :type dir:       string
-    :param after:    consider only commits after this date
-    :type after:     datetime.datetime
-    :param branches: branches to consider (default None, means "all branches")
-    :type branches:  list of str
-    :param cache:    path for the cache for storing commits
-    :type cache:     str
-
-    """
-
-    def __init__(self, url, dir, after=None, branches=["master"], cache=None):
-
-        self.url = url
-        self.dir = dir
-        if after is None:
-            self.after = datetime.datetime(1970, 1, 1, 0, 0)
-        else:
-            self.after = after
-        self.branches = branches
-
-        # Get the git repository always, to be able of checking out later,
-        # if needed
-        parser = perceval.backends.git.Git(uri=self.url, gitpath=self.dir)
-
-        # The cache is ok if the calue for 'done' is True
-        cache_ok = False
-        if cache is not None:
-            cache_data = shelve.open(cache)
-            if 'done' in cache_data and cache_data['done']:
-                cache_ok = True
-
-        # Get commits from the cache (if ok) or from the repo (via Perceval)
-        if cache_ok:
-            self.commits = cache_data['commits']
-        else:
-            self.commits = []
-            commits_fetcher = parser.fetch(from_date = self.after,
-                                            branches=self.branches)
-            for item in commits_fetcher:
-                self.commits.append([item['data']['commit'],
-                                    item['data']['CommitDate']])
-
-        # Store data in the cache, if needed
-        if cache is not None:
-            if not cache_ok:
-                cache_data['commits'] = self.commits
-                cache_data['done'] = True
-            cache_data.close()
-
-
-    def get_commits (self):
-        """Get list of commits.
-
-        Get the list of commits managed by objects in this class.
-
-        :returns:         list of commits (each commit is a list [hash, date])
-
-        """
-
-        return self.commits
-
-    def last_commit (self):
-        """Get last commit number.
-
-        Get the last commit in the list maintained by objects in this class.
-        This sould correspond to the last commit produced by git log, in
-        reverse orther (that is, the first commit produced by git log).
-
-        """
-
-        return len(self.commits) - 1
-
-    def checkout(self, commit_no, store=None):
-        """Checkout the version of the repository corresponding to commit_no.
-
-        If store is None, just checkout the commit in the repo, in the
-        directory specified when instantiating the object, but don't
-        copy it to a directory.
-
-        If store is not None, it will be the directory for
-        storage, where a subdirectory will be produced, with the hash as name,
-        to copy the checkout.
-
-        If specified, store should exist. If there is already a checkout for
-        this commit in store, just checkout in the repository, but don't copy.
-
-        :param commit_no: commit number to check out
-        :param store:     directory to copy the checkout to (default: None)
-        :returns:         path of directory with the checkout, or None if none
-
-        """
-
-        hash = self.commits[commit_no][0]
-        subprocess.call(["git", "-C", self.dir, "checkout", hash],
-                        stdout = subprocess.DEVNULL, stderr = subprocess.DEVNULL)
-        if store is not None:
-            checkout_dir = os.path.join(store, hash)
-            if not os.path.isdir(checkout_dir):
-                shutil.copytree(self.dir, checkout_dir)
-            return checkout_dir
-        else:
-            return None
-
-    # def compute_diff(self, commit_no, dir, metrics=['diff']):
-    #     """Compute diff metrics between the repo checkout for commit_no and dir.
-    #
-    #     Checks out commit_no (as per git log order) in the git repository, and
-    #     computes the metrics for its difference with the given directory.
-    #     The returned metrics are those produced by compare_dirs plus:
-    #      * commit: hash for the commit
-    #      * date: commit date for the commit (as a string)
-    #
-    #     :param commit_no: commit number to checkout
-    #     :param dir:       directory to compare
-    #     :param metrics:   metrics to produce when comparing (list)
-    #     :returns:         dictionary with metrics
-    #
-    #     """
-    #
-    #     commit = self.commits[commit_no]
-    #     self.checkout(commit_no)
-    #
-    #     dircmp = BaseDir(self.dir, metrics)
-    #     m = dircmp.compare(dir)
-    #
-    #     logging.debug ("Commit %s. Files: %d, %d, %d, lines: %d, %d, %d, %d)"
-    #         % (commit[0], m["left_files"], m["right_files"], m["diff_files"],
-    #         m["left_lines"], m["right_lines"],
-    #         m["added_lines"], m["removed_lines"]))
-    #     m["total_files"] = m["left_files"] + m["right_files"] + m["diff_files"]
-    #     m["total_lines"] = m["left_lines"] + m["right_lines"] \
-    #         + m["added_lines"] + m["removed_lines"]
-    #     m["commit_seq"] = commit_no
-    #     m["commit"] = commit[0]
-    #     m["date"] = commit[1]
-    #     return m
