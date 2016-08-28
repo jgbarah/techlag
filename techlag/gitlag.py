@@ -137,8 +137,26 @@ def extract_dpkg(dpkg, remove=False):
 class BaseDir():
     """Base directory to compare with others.
 
-    For an explanation of the metrics instantiation parameter, read
-    the comments for the compare function.
+    Objects in this class are designed to easy the comparison of a directory
+    with several checkouts of a git repository. It provides functions to
+    compute several metrics that can be used to estimate how similar
+    (or how different) the directory is from a given checkout. Since the
+    directory is always the same in the different comparisons, some
+    data can be cached between comparisons (for example, the number of lines
+    of files in the directory, see explanation on cache, below).
+
+    The 'metrics' instantiation parameter controls which kind of metrics
+    will be produced when comparing this directory. This is a list with all
+    the kinds of metrics to be produced. Currently, the following kinds
+    of metrics can be speficied: 'diff', and 'same'. For more details on
+    the metrics computed, read comments for the compare function. By default,
+    metrics of kind 'diff' will be produced.
+
+    Objects in this class maintain a in-memory cache of the number of lines
+    of each file in dir which is computed. Usually, those files are computed
+    when they are found to be exactly equal to the version in the directory
+    being compared (to increment the number of equal lines), or when it is
+    found to be only inn dir (to increment the number of different lines).
 
     :param name: name (full path) of directory to compare
     :param metrics: metrics to produce when comparing (list)
@@ -153,16 +171,24 @@ class BaseDir():
         # Cache for metrics of unique files in self.dir
         self.lines = {}
 
-    def _count_unique(self, dir, files, use_cache=False):
-        """Count unique files.
+    def count_files(self, dir, files, use_cache=False):
+        """Count some files in a directory, and their number of lines
 
-        Unique files are those that are only in one of the directories
-        that are compared (left or right).
+        Given a list of files in a directory, count them (number of
+        elements in the list) and count the lines in all of them.
 
-        :param dir: directory to count
-        :param files: files in that directory
-        :param use_cache: use cache for lines
-        :returns: tuple with number of files and total lines in those files
+        If use_cache is True, use an in-memory cache to store the
+        result for each file computed. Please note that this only make
+        sense if the directory in which those files are is always the
+        same. Therefore it is used usually only with files corresp0nding
+        to the directory managed by the object. Usually it is an error
+        to have use_cache True for a directory which is not the managed
+        directory.
+
+        :param files:     files to compute
+        :param dir:       directory with files (default, None)
+        :param use_cache: use cache for files computed (default False)
+        :returns:         tuple [number of files, total lines in those files]
 
         """
 
@@ -179,23 +205,31 @@ class BaseDir():
                 else:
                     with open(name, encoding="ascii", errors="surrogateescape") as f:
                         file_lines = sum(1 for line in f)
-                    logging.debug("Unique file: %s (lines: %d)" % (name, file_lines))
+                    logging.debug("Counted file: %s (lines: %d)" % (name, file_lines))
                     if use_cache:
-                        logging.debug("Unique file to cache: %s (lines: %d)" %
+                        logging.debug("Counted file to cache: %s (lines: %d)" %
                                         (name, file_lines))
                         self.lines[name] = file_lines
                 num_lines += file_lines
-        logging.debug ("Unique files in dir %s: files: %d, lines: %d"
+        logging.debug ("Counted files in dir %s: files: %d, lines: %d"
             % (dir, num_files, num_lines))
         return (num_files, num_lines)
 
     @staticmethod
-    def _compare_files(file_left, file_right):
+    def compare_files(file_left, file_right):
         """Compare two files.
+
+        Compares two files, given their paths. Checks if they are equal
+        or different, and the number of lines added, removed
+        and equal from file_left to file__right. Returns the information as
+        a tuple, with the first element being 1 (if different) or 0 (if equal),
+        and then the number of lines added, lines removed, and lines equal.
+
+        Uses a difflib Differ to do the job.
 
         :param file_left: left file to compare
         :param file_right: left file to compare
-        :returns: tuple with 1 (if different), 0 (if equal), lines added, removed
+        :returns: tuple [equality_check, added, removed, equal]
 
         """
 
@@ -221,17 +255,21 @@ class BaseDir():
         return (different, added, removed, equal)
 
     @classmethod
-    def _count_common(cls, dir_left, dir_right, files):
-        """Count common files.
+    def count_diff(cls, dir_left, dir_right, files):
+        """Count differences in files present in two directories.
 
-        Common files are those that are in both directories being compared
-        (left or right).
+        Given a list of files supposed to be present in two directories,
+        compute their differences. All files are supposed to exist in
+        both directories.
 
-        :param dir_left: left directory to count
-        :param dir_right: right directory to count
-        :param files: files in both directories
-        :returns: tuple with number of diff files, and total lines added,
-            removed in those files
+        Returns a tuple with the number of different files, and the total
+        number of lines added, removed and equal from the files in the
+        left directory to the files in the right directory.
+
+        :param dir_left:  left directory to consider
+        :param dir_right: right directory to consider
+        :param files:     files to compute, supposed to be in both directories
+        :returns:         tuple [diff_files, added, removed, changed]
         """
 
         added = 0
@@ -242,7 +280,7 @@ class BaseDir():
             name_left = os.path.join(dir_left, file)
             name_right = os.path.join(dir_right, file)
             (diff, added_l, removed_l, equal_l) = \
-                cls._compare_files(name_left, name_right)
+                cls.compare_files(name_left, name_right)
             diff_files += diff
             added += added_l
             removed += removed_l
@@ -252,27 +290,35 @@ class BaseDir():
     def _compare_dirs(self, dcmp):
         """Compare two directories given their filecmp.dircmp object.
 
-        Produces as a result a dictionary with metrics about the comparison.
-        The file on the left is self.dir.
+        This function is needed to search recursively, using dcmp objects,
+        all the subdirs common in both of the directories being commpared.
+
+        Produces as a result a dictionary with metrics about the comparison
+        (see compare function for details), aggregated for the directory
+        corresponding to dcmp, and all the common subdirectories.
+
+        When this function is called by compare, as usual, the file on
+        the left is self.dir.
 
         :param dcmp: filecmp.dircmp object for directories to compare
-        :returns: dictionary with differences
+        :returns:    dictionary with comparison metrics
 
         """
 
+        logging.debug('Comparing dirs: ' + dcmp.left + ', ' + dcmp.right)
         m = {}
         if 'diff' in self.metrics:
             (m["left_files"], m["left_lines"]) \
-                = self._count_unique(dir = dcmp.left, files = dcmp.left_only,
+                = self.count_files(dir = dcmp.left, files = dcmp.left_only,
                                     use_cache=True)
             (m["right_files"], m["right_lines"]) \
-                = self._count_unique(dir = dcmp.right, files = dcmp.right_only)
+                = self.count_files(dir = dcmp.right, files = dcmp.right_only)
         if 'same' in self.metrics:
             (m["same_files"], m["same_lines"]) \
-                = self._count_unique(dir = dcmp.left, files = dcmp.same_files,
+                = self.count_files(dir = dcmp.left, files = dcmp.same_files,
                                     use_cache=True)
         (m['diff_files'], m['added_lines'], m['removed_lines'], m['equal_lines']) \
-            = self._count_common(dcmp.left, dcmp.right, dcmp.diff_files)
+            = self.count_diff(dcmp.left, dcmp.right, dcmp.diff_files)
         for sub_dcmp in dcmp.subdirs.values():
             m_subdir = self._compare_dirs(sub_dcmp)
             for metric, value in m_subdir.items():
@@ -306,8 +352,11 @@ class BaseDir():
         added_lines, removed_lines, equal_lines refer only to files counted as diff_files
         same_lines refer to common_files
 
+        Theh results produced by the function is a dictionary with the metrics
+        corresponding to the metrics_kinds specified when instantiating the object.
+
         :param dir: name (full path) of directory to compare
-        :returns: dictionary with differences
+        :returns:   dictionary with comparison metrics
 
         """
 
