@@ -36,6 +36,16 @@ import datetime
 import shutil
 import shelve
 
+"""This module provides classes for estimating the more likely checkout
+in a git repository, when comparing to a certain directory. The directory
+usually corresponds to a snapshot of the git repository, like a downloadable
+tarball, or a Debian/Ubuntu package. Although it is derived from the
+upstream repository, usually it is not exactly equal to any checkout
+(commit) from it. Therefore, we use several metrics to estimate how
+close any checkout from the upstream repo is to the directory.
+
+"""
+
 def get_dpkg_data (file_name, pkg_name):
     """Get the urls of the components of a source package in aSources.gz file.
 
@@ -610,8 +620,8 @@ class Metrics:
     #
     #     return len(self.commits)
 
-    def compute_metrics(self, commit_no):
-        """Compute metrics for a given coommit.
+    def commit_metrics(self, commit_no):
+        """Compute comparison metrics for a given coommit.
 
         Check out the corresponding commit in the git repository, and
         compute the metrics for commparing it with the base directory.
@@ -636,44 +646,64 @@ class Metrics:
         subprocess.call(["git", "-C", self.repo.dir, "checkout", commit[0]],
                         stdout = subprocess.DEVNULL, stderr = subprocess.DEVNULL)
         m = self.basedir.compare(self.repo.dir)
-        logging.debug ("Commit %s. Metrics: %s" % (str(commit), str(m)))
         m["commit_seq"] = commit_no
         m["commit"] = commit[0]
         m["date"] = commit[1]
+        logging.debug ("Commit %s. Metrics: %s" % (str(commit), str(m)))
         return m
 
-    def compute_range (self, first, last, step):
+    def range_metrics (self, first, last, step):
         """Compute metrics for a range of commits.
 
         Compute metrics for a range of commits, but only for those in the
         appropriate steps.
 
+        This function computes the comaprison metrics for some
+        commits in the given range. Every step commit out of the
+        range will ve computed. The metris for computed commits will be
+        stored in the internal data structure maintained by the object.
+        If metrics for a commmit had been computed previously, they
+        are already stored in that data structure, and won't be
+        computed again.
+
+        For example, if range is 1:40, and steps is 10, the computed
+        commits will be 1, 11, 21, 31 and 40.
+
         :param first: first commit to consider
-        :param last: last commit to consider
-        :param step: only consider commits coincident with step
-        :returns: dictionary with (updated) metrics
+        :param last:  last commit to consider
+        :param step:  only compute commits coincident with step
 
         """
 
+        logging.info("Computing metrics for range: %d - %d, step %d" %
+                    (first, last, step))
         for seq_no in list(range(first, last, step)) + [last]:
-            logging.info("Computing metrics for %d." % seq_no)
             if seq_no not in self.metrics:
-                m = self.compute_metrics(seq_no)
-                logging.debug(m)
+                logging.info("Computing metrics for %d." % seq_no)
+                m = self.commit_metrics(seq_no)
                 self.metrics[seq_no] = m
 
     def closest_range (self, length, metric='diff_files',closest_fn=min):
         """Find range of minimum values.
 
-        Returns a range of closes values. The range will have at least
-        length values. In fact, a tuple with the lowest sequence number, and
-        the maximum sequence number for the range, the sequence number for
-        the closest value, and the closest value.
+        Find out, for the commits we have already computed, the range
+        with closer values (lower or higher, depending on closest_fn).
+        The range will be of size lenght, plus one more element in both
+        sides, if that's possible (the range does not not include the
+        first or last computed commits). The extra elements are included
+        just in case the real closest commit is one of the still
+        uncomputed commits, just left or right of the computed range.
 
-        :param length: length (number of values) of the range
-        :param metric: name of the metric to consider for comparison
+        The comparison for deciding is a value is closer or not, is
+        based only on metric.
+
+        Returns a tuple with the lowest and highest commit number in the
+        range, the commit number for the closest value, and the closest value.
+
+        :param length:     length (number of values) of the range
+        :param metric:     name of the metric to consider for comparison
         :param closest_fn: function to use to find the closest value (min, max)
-        :returns: tuple (min, max, closest_index, closest_value)
+        :returns:          tuple (min, max, closest_index, closest_value)
 
         """
 
@@ -685,30 +715,27 @@ class Metrics:
         values = []
         indexes = []
         seq_commits = sorted(self.metrics)
-        for seq_no in seq_commits:
-            value = self.metrics[seq_no][metric]
+        for commit_no in seq_commits:
+            value = self.metrics[commit_no][metric]
             if len(values) <= length:
                 # Still room, just add to lists
                 values.append(value)
-                indexes.append(seq_no)
+                indexes.append(commit_no)
             else:
-                # Only worry if valus is closer than farthest in lists
+                # Only worry if valus is closer than the farthest we have
                 furthest = furthest_fn(values)
-#                largest = max(values)
-                if closer_fn([value, furthest]) == value:
+                if closest_fn([value, furthest]) == value:
                     # Value is closer than furthest. Remove it from lists
                     farthest_index = values.index(farthest)
                     values.pop(farthest_index)
                     indexes.pop(farthest_index)
                     # And now add value to the right
                     values.append(value)
-                    indexes.append(seq_no)
+                    indexes.append(commit_no)
             logging.debug("values: " + str(values))
             logging.debug("indexes " + str(indexes))
-        closest_value = closest_fn(values)
-        closest_index = indexes[values.index(closest_value)]
-        # Add next computed checkout on the left and on the right, just in case we're
-        # on the edge of the checkouts we have computed
+        # Add next computed checkout on the left and on the right,
+        # just in case we're on the edge of the checkouts we have computed
         if indexes[0] > seq_commits[0]:
             left_seq = seq_commits[seq_commits.index(indexes[0])-1]
             indexes.insert(0, left_seq)
@@ -717,8 +744,10 @@ class Metrics:
             right_seq = seq_commits[seq_commits.index(indexes[-1])+1]
             indexes.append(right_seq)
             values.append(self.metrics[right_seq][metric])
-        logging.info("values: " + str(values))
-        logging.info("indexes " + str(indexes))
+        closest_value = closest_fn(values)
+        closest_index = indexes[values.index(closest_value)]
+        logging.info("Closest values: " + str(values))
+        logging.info("Closest indexes " + str(indexes))
         return (indexes[0], indexes[-1], closest_index, closest_value)
 
     def metrics_items (self):
@@ -726,28 +755,28 @@ class Metrics:
 
         """
 
-        return [self.metrics[seq_no] for seq_no in sorted(self.metrics)]
+        return [self.metrics[commit_no] for commit_no in sorted(self.metrics)]
 
-    def find_upstream_commit (self, steps=10, name=None,
-            closest_fn=min, metric='diff_files'):
-        """Find the most likely upstream commit.
+    def closest_commit (self, steps=10, name=None,
+                        closest_fn=min, metric='diff_files'):
+        """Find the closest commit, for the given function and metric.
 
-        Compares a source code directory with the checkouts from its upstream
-        git repo, with the intention of finding the most likely upstream commit
-        for the specific source code in the directory. The directory usually
-        corresponds to a snapshot of the git repository, like a downloadable
-        tarball, or a Debian/Ubuntu package. Although it is derived from the
-        upstream repository, usually it is not exactly equal to any checkout
-        (commit) from it. Therefore, we use several metrics to estimate how
-        close any checkout from the upstream repo is to the directory.
+        Compares the base directory with the checkouts from a
+        git repo, with the intention of finding the closest checkout.
 
         closest_fn and metric usually work together. metric is the metric that
         will be used to decide if a commit is closer to the directory than other.
         Depending on the metric, we want to maximize (for similarity metrics)
         or minimize it (for difference metrics).
 
-        :param after:        check only commits after this date
-        :type after:         datetime.datetime
+        Instead of checking all checkouts, whcih may be very time consuming,
+        we will follow an interative strategy. First, we will compute the
+        comparison metrics for the first and last commits, and for one
+        commit out of every steps. After that, the closest range will be
+        identified, and the metrics computed again for that range, with
+        steps as the ratio to calculate the step. That will follow until
+        metrics are computed for a range with step 1.
+
         :param steps:        do approximation according to these steps
         :param name:         name of package being computed (Default: dir)
         :type name:          string
@@ -766,7 +795,7 @@ class Metrics:
         # Needed because we want eg. 1/3 to be 1
         step = -( -len(self.commits) // steps)
         while step >= 1:
-            self.compute_range (left, right, step)
+            self.range_metrics (left, right, step)
             (left, right, closest_seq, closest_value) \
                 = self.closest_range(length=3, metric=metric,
                                     closest_fn=closest_fn)

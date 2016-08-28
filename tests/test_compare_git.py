@@ -78,22 +78,22 @@ class TestCompareGit(unittest.TestCase):
         repo = techlag.gitlag.Repo(url=self.url_git, dir=self.cloned_git)
         metrics = techlag.gitlag.Metrics(repo=repo, dir=self.dir1,
                                         metrics_kinds=['same'])
-        result = metrics.find_upstream_commit(closest_fn=max,
+        result = metrics.closest_commit(closest_fn=max,
                                                 metric='common_lines')
         self.assertEqual(result, expected_1)
 
-        result = metrics.find_upstream_commit()
+        result = metrics.closest_commit()
         self.assertEqual(result, expected_2)
 
         metrics = techlag.gitlag.Metrics(repo=repo, dir=self.dir1,
                                         metrics_kinds=['diff'])
-        result = metrics.find_upstream_commit(closest_fn=min,
+        result = metrics.closest_commit(closest_fn=min,
                                                 metric='different_lines')
         self.assertEqual(result, expected_2)
 
         metrics = techlag.gitlag.Metrics(repo=repo, dir=self.dir2,
                                         metrics_kinds=['same'])
-        result = metrics.find_upstream_commit(closest_fn=max,
+        result = metrics.closest_commit(closest_fn=max,
                                                 metric='common_lines')
         self.assertEqual(result, expected_3)
 
