@@ -324,7 +324,10 @@ class BaseDir():
         return m
 
 class Metrics:
-    """Data structure for dealing with metrics related to commits.
+    """Class for getting metrics comparing a git repository with a directory.
+
+    :param repo: Repo object (git repository)
+    :param dir:  directory to compare with the git repository
 
     """
 
@@ -612,7 +615,8 @@ class Repo:
         return m
 
 
-def find_upstream_commit (upstream, dir, steps=10, name=""):
+def find_upstream_commit (upstream, dir, steps=10, name=None,
+        metrics_kinds=['diff'], closest_fn=min, metric='diff_lines'):
     """Find the most likely upstream commit.
 
     Compares a source code directory with the checkouts from its upstream
@@ -624,19 +628,31 @@ def find_upstream_commit (upstream, dir, steps=10, name=""):
     (commit) from it. Therefore, we use several metrics to estimate how
     close any checkout from the upstream repo is to the directory.
 
-    :param upstream: upstream git repository metadata
-    :type upstream:   Repo
-    :param dir:      source code directory to match to upstream
-    :param after:    check only commits after this date
-    :type after:      datetime.datetime
-    :param steps:    do approximation according to these steps
-    :param name:      name of package being computed
-    :type name:       string
+    metrics_kind are the metrics that will be computed to compare each commit
+    with the directory. They may be any list from ['same', 'diff']
 
-    :returns:         dictionary with infom about most similar commit
+    closest_fn and metric usually work together. metric is the metric that
+    will be used to decide if a commit is closer to the directory than other.
+    Depending on the metric, we want to maximize (for similarity metrics)
+    or minimize it (for difference metrics).
+
+    :param upstream:     upstream git repository metadata
+    :type upstream:      Repo
+    :param dir:          source code directory to match to upstream
+    :param after:        check only commits after this date
+    :type after:         datetime.datetime
+    :param steps:        do approximation according to these steps
+    :param name:         name of package being computed (Default: dir)
+    :type name:          string
+    :param metrics_kind: kinds of metrics to analyze each commit
+    :param closest_fn:   function to evaluate the closest commit (min or max)
+    :param metric:       metric to decide if a commit is closer or not
+    :returns:            dictionary with infom about most similar commit
 
     """
 
+    if name is None:
+        name = dir
     metrics = Metrics(repo=upstream, dir=dir)
     metrics.add_commits(upstream.get_commits())
     logging.info("%d commits parsed." % metrics.num_commits())
@@ -646,12 +662,10 @@ def find_upstream_commit (upstream, dir, steps=10, name=""):
     # Next calculates the ceiling integer division
     # Needed because we want eg. 1/3 to be 1
     step = -(-metrics.num_commits() // steps)
-    metrics_kinds = ['same']
-    closest_fn=max
     while step >= 1:
         metrics.compute_range (left, right, step, metrics=metrics_kinds)
         (left, right, closest_seq, closest_value) \
-            = metrics.closest_range(length=3, metric="common_lines",
+            = metrics.closest_range(length=3, metric=metric,
                                 closest_fn=closest_fn)
         logging.info("Step: %d, left: %d, right: %d, closest seq: %d, closest value: %d."
                     % (step, left, right, closest_seq, closest_value))

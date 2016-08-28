@@ -59,10 +59,18 @@ class TestCompareGit(unittest.TestCase):
     def test_upstream_commit(self):
         """Test find_upstream_commit"""
 
+        expected = {
+            'date': 'Sat Aug 27 17:00:32 2016 +0200',
+            'sequence': 0, 'diff': 30,
+            'hash': '1b3a00eb5668e602b70faa3dbc6f6eda0046e8f5'
+            }
         repo = techlag.gitlag.Repo(url=self.url_git, dir=self.cloned_git)
         result = techlag.gitlag.find_upstream_commit(upstream=repo,
-                                                    dir=self.dir1)
-        print(result)
+                                                    dir=self.dir1,
+                                                    metrics_kinds=['same'],
+                                                    closest_fn=max,
+                                                    metric='common_lines')
+        self.assertEqual(result, expected)
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
