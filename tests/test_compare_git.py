@@ -36,7 +36,7 @@ if not '..' in sys.path:
 import techlag.gitlag
 
 class TestCompareGit(unittest.TestCase):
-    """Tests for comparing a dirctory to a git repository"""
+    """Tests for comparing a directory to a git repository"""
 
     @classmethod
     def setUpClass(cls):
@@ -56,8 +56,8 @@ class TestCompareGit(unittest.TestCase):
     def tearDownClass(cls):
         shutil.rmtree(cls.tmp_path)
 
-    def test_upstream_commit(self):
-        """Test find_upstream_commit"""
+    def test_closest_commit(self):
+        """Test Metrics.closest_commit"""
 
         expected_1 = {
             'date': 'Sat Aug 27 17:00:32 2016 +0200',
@@ -97,6 +97,90 @@ class TestCompareGit(unittest.TestCase):
                                                 metric='common_lines')
         self.assertEqual(result, expected_3)
 
+class TestCompareGitSmall(unittest.TestCase):
+    """Tests for comparing a dirctory to a small git repository
+
+    This is small, but larger than dir1. In fact, it is based on
+    the techlag repo.
+
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp_path = tempfile.mkdtemp(prefix='gitlag_')
+        cls.dir1 = os.path.join(cls.tmp_path, 'dirs2', 'b306b9d')
+        cls.dir2 = os.path.join(cls.tmp_path, 'dirs2', '7beb12a')
+        cls.dir3 = os.path.join(cls.tmp_path, 'dirs2', '6d1c3c1')
+        cls.dir4 = os.path.join(cls.tmp_path, 'dirs2', '7beb12a-close')
+        cls.url_git = os.path.join(cls.tmp_path, 'dir2_git')
+        cls.cloned_git = os.path.join(cls.tmp_path, 'cloned_git')
+
+        subprocess.check_call(['tar', '-xzf', 'data/dirs2.tar.gz',
+                               '-C', cls.tmp_path])
+        subprocess.check_call(['tar', '-xzf', 'data/dir2_git.tar.gz',
+                               '-C', cls.tmp_path])
+
+        cls.repo = techlag.gitlag.Repo(url=cls.url_git, dir=cls.cloned_git)
+
+        cls.expected = [{
+            'date': 'Fri Jun 24 20:46:17 2016 +0200',
+            'sequence': 0, 'diff': 676,
+            'hash': 'b306b9d7c4bbd7e5310f32150223f94b25d53040'
+            },
+            {
+            'date': 'Sat Aug 6 11:13:41 2016 +0200',
+            'sequence': 12, 'diff': 1921,
+            'hash': '7beb12a054f84ab0021f34541073033c247146ca'
+            },
+            {
+            'date': 'Sun Aug 28 21:06:55 2016 +0200',
+            'sequence': 27, 'diff': 2560,
+            'hash': '6d1c3c1ebf30540be4b70ab33ef92baedad21f40'
+            }]
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmp_path)
+
+    def test_closest_commit_1(self):
+        """Test Metrics.closest_commit"""
+
+        metrics = techlag.gitlag.Metrics(repo=self.repo, dir=self.dir1,
+                                        metrics_kinds=['same'])
+        result = metrics.closest_commit(closest_fn=max,
+                                        metric='common_lines')
+        self.assertEqual(result, self.expected[0])
+
+    def test_closest_commit_2(self):
+        """Test Metrics.closest_commit"""
+
+
+        metrics = techlag.gitlag.Metrics(repo=self.repo, dir=self.dir2,
+                                        metrics_kinds=['same'])
+        result = metrics.closest_commit(closest_fn=max,
+                                        metric='common_lines')
+        self.assertEqual(result, self.expected[1])
+
+    def test_closest_commit_3(self):
+        """Test Metrics.closest_commit"""
+
+        metrics = techlag.gitlag.Metrics(repo=self.repo, dir=self.dir3,
+                                        metrics_kinds=['same'])
+        result = metrics.closest_commit(closest_fn=max,
+                                        metric='common_lines')
+        self.assertEqual(result, self.expected[2])
+
+    def test_closest_commit_4(self):
+        """Test Metrics.closest_commit"""
+
+        metrics = techlag.gitlag.Metrics(repo=self.repo, dir=self.dir4,
+                                        metrics_kinds=['same'])
+        result = metrics.closest_commit(closest_fn=max,
+                                        metric='common_lines')
+        expected = self.expected[1].copy()
+        expected['diff'] = 1890
+        self.assertEqual(result, expected)
+
 if __name__ == "__main__":
-#    logging.basicConfig(level=logging.DEBUG)
+    logging.basicConfig(level=logging.INFO)
     unittest.main()

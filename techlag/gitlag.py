@@ -382,7 +382,7 @@ class BaseDir():
                 if use_cache and (name in self.lines):
                     # Get result from cache
                     file_lines = self.lines[name]
-                    logging.debug("Unique file from cache: %s (lines: %d)" %
+                    logging.debug("Computed file from cache: %s (lines: %d)" %
                                 (name, file_lines))
                 else:
                     with open(name, encoding="ascii", errors="surrogateescape") as f:
@@ -723,8 +723,8 @@ class Metrics:
                 indexes.append(commit_no)
             else:
                 # Only worry if valus is closer than the farthest we have
-                furthest = furthest_fn(values)
-                if closest_fn([value, furthest]) == value:
+                farthest = farthest_fn(values)
+                if closest_fn([value, farthest]) == value:
                     # Value is closer than furthest. Remove it from lists
                     farthest_index = values.index(farthest)
                     values.pop(farthest_index)
