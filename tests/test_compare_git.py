@@ -59,19 +59,44 @@ class TestCompareGit(unittest.TestCase):
     def test_upstream_commit(self):
         """Test find_upstream_commit"""
 
-        expected = {
+        expected_1 = {
             'date': 'Sat Aug 27 17:00:32 2016 +0200',
             'sequence': 0, 'diff': 30,
             'hash': '1b3a00eb5668e602b70faa3dbc6f6eda0046e8f5'
             }
+        expected_2 = {
+            'date': 'Sat Aug 27 17:00:32 2016 +0200',
+            'sequence': 0, 'diff': 0,
+            'hash': '1b3a00eb5668e602b70faa3dbc6f6eda0046e8f5'
+            }
+        expected_3 = {
+            'date': 'Sat Aug 27 17:02:06 2016 +0200',
+            'sequence': 1, 'diff': 27,
+            'hash': 'a8c58489359197983a2e7235fd3e09346313a430'
+            }
+
         repo = techlag.gitlag.Repo(url=self.url_git, dir=self.cloned_git)
-        result = techlag.gitlag.find_upstream_commit(upstream=repo,
-                                                    dir=self.dir1,
-                                                    metrics_kinds=['same'],
-                                                    closest_fn=max,
-                                                    metric='common_lines')
-        self.assertEqual(result, expected)
+        metrics = techlag.gitlag.Metrics(repo=repo, dir=self.dir1,
+                                        metrics_kinds=['same'])
+        result = metrics.find_upstream_commit(closest_fn=max,
+                                                metric='common_lines')
+        self.assertEqual(result, expected_1)
+
+        result = metrics.find_upstream_commit()
+        self.assertEqual(result, expected_2)
+
+        metrics = techlag.gitlag.Metrics(repo=repo, dir=self.dir1,
+                                        metrics_kinds=['diff'])
+        result = metrics.find_upstream_commit(closest_fn=min,
+                                                metric='different_lines')
+        self.assertEqual(result, expected_2)
+
+        metrics = techlag.gitlag.Metrics(repo=repo, dir=self.dir2,
+                                        metrics_kinds=['same'])
+        result = metrics.find_upstream_commit(closest_fn=max,
+                                                metric='common_lines')
+        self.assertEqual(result, expected_3)
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
+#    logging.basicConfig(level=logging.DEBUG)
     unittest.main()
