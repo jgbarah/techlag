@@ -546,10 +546,11 @@ class BaseDir():
         return m
 
 class Metrics:
-    """Class for getting metrics comparing a git repository with a directory.
+    """Class for computing metrics comparing a git repository with a directory.
 
     metrics_kinds are the kind of metrics that will be computed to compare
-    each commit with the directory. They may be any list from ['same', 'diff']
+    each commit with the directory. They may be any list from ['same', 'diff'].
+    See BaseDir class to learn more about the metrics computed in each case.
 
     :param repo:          Repo object (git repository)
     :param dir:           directory to compare with the git repository
@@ -559,76 +560,82 @@ class Metrics:
 
     def __init__(self, repo, dir, metrics_kinds=['diff']):
 
-        # List of commit hashes, ordered as returned by git
-        self.commits = []
-        # Dictionary with metrics, key is the commit number (order in commits)
-        self.metrics = {}
-        # Repository and directory to compare
         self.repo = repo
         self.dir = dir
         for metric in metrics_kinds:
             assert metric in ['diff', 'same']
         self.metrics_kinds = metrics_kinds
 
-    def add_commit(self, commit, date):
-        """Add commit info to data structure.
+        self.basedir = BaseDir(self.dir, metrics=self.metrics_kinds)
+        # List of commit hashes, ordered as returned by git log (reverse)
+        self.commits = self.repo.get_commits()
+        logging.info("Metrics: %d commits parsed." % len(self.commits))
+        # Dictionary with metrics, key is the commit number (order in commits)
+        self.metrics = {}
 
-        :param commit: hash of the commit
-        :param date: commit date
+    # def add_commit(self, commit, date):
+    #     """Add commit info to data structure.
+    #
+    #     :param commit: hash of the commit
+    #     :param date: commit date
+    #
+    #     """
+    #
+    #     self.commits.append([commit, date])
 
-        """
+    # def add_commits(self, commits):
+    #     """Update info about commits to data structure.
+    #
+    #     Commits come as a list of dictionaries, one per commit, in order
+    #     (according to the order in Perceval, or git log for that matter).
+    #     Each item in the list is a list [commit, date].
+    #
+    #     :param commits: list of hashes for commits
+    #
+    #     """
+    #
+    #     self.commits = commits
 
-        self.commits.append([commit, date])
+    # def get_commit(self, seq_no):
+    #     """Get a commit tuple (hash, date) for a given commit sequence.
+    #
+    #     """
+    #
+    #     return self.commits[seq_no]
 
-    def add_commits(self, commits):
-        """Update info about commits to data structure.
-
-        Commits come as a list of dictionaries, one per commit, in order
-        (according to the order in Perceval, or git log for that matter).
-        Each item in the list is a list [commit, date].
-
-        :param commits: list of hashes for commits
-
-        """
-
-        self.commits = commits
-
-    def get_commit(self, seq_no):
-        """Get a commit tuple (hash, date) for a given commit sequence.
-
-        """
-
-        return self.commits[seq_no]
-
-    def num_commits(self):
-        """Return the number of commits stored.
-
-        """
-
-        return len(self.commits)
+    # def num_commits(self):
+    #     """Return the number of commits stored.
+    #
+    #     """
+    #
+    #     return len(self.commits)
 
     def compute_metrics(self, commit_no):
-        """Compute metrics for commmit number (ordered as from git log).
+        """Compute metrics for a given coommit.
 
-        For an explanation of the metrics instantiation parameter, read
-        the comments for the BaseDir.compare function.
+        Check out the corresponding commit in the git repository, and
+        compute the metrics for commparing it with the base directory.
 
-        Checks out the corresponding commit in the git repository, and
-        compute the metrics for its difference with the given package.
         The returned metrics are those produced by BaseDir.compare plus:
          * commit: hash for the commit
          * date: commit date for the commit (as a string)
 
-        :param commits: list of all commits
+        For an explanation of the metrics instantiation parameter, read
+        the comments for the BaseDir.compare function.
+
+        commit_no is as provided by the Repo class, which in turn
+        is provided by Perceval. This is the order as by git log,
+        reversed.
+
         :param commit_no: commit number (starting in 0)
-        :returns: dictionary with metrics
+        :returns:         dictionary with metrics for comparison
+
         """
 
         commit = self.commits[commit_no]
         subprocess.call(["git", "-C", self.repo.dir, "checkout", commit[0]],
                         stdout = subprocess.DEVNULL, stderr = subprocess.DEVNULL)
-        dircmp = BaseDir(self.dir, metrics=self.metrics_kinds)
-        m = dircmp.compare(self.repo.dir)
+        m = self.basedir.compare(self.repo.dir)
         logging.debug ("Commit %s. Metrics: %s" % (str(commit), str(m)))
         m["commit_seq"] = commit_no
         m["commit"] = commit[0]
@@ -752,14 +759,12 @@ class Metrics:
 
         if name is None:
             name = self.dir
-        self.add_commits(self.repo.get_commits())
-        logging.info("%d commits parsed." % self.num_commits())
 
         left = 0
-        right = self.num_commits() - 1
+        right = len(self.commits) - 1
         # Next calculates the ceiling integer division
         # Needed because we want eg. 1/3 to be 1
-        step = -(-self.num_commits() // steps)
+        step = -( -len(self.commits) // steps)
         while step >= 1:
             self.compute_range (left, right, step)
             (left, right, closest_seq, closest_value) \
@@ -775,7 +780,7 @@ class Metrics:
                     step = step - 1
                 else:
                     step = candidate_step
-        closest_commit = self.get_commit(closest_seq)
+        closest_commit = self.commits[closest_seq]
         most_similar = {
             'sequence': closest_seq,
             'diff': closest_value,
