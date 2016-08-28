@@ -321,17 +321,22 @@ class BaseDir():
         if 'same' in self.metrics:
             m['common_files'] = m['same_files']
             m['common_lines'] = m['same_lines'] + m['equal_lines']
+        logging.debug("BaseDir.compare(): " + str(m))
         return m
 
 class Metrics:
     """Class for getting metrics comparing a git repository with a directory.
 
-    :param repo: Repo object (git repository)
-    :param dir:  directory to compare with the git repository
+    metrics_kinds are the kind of metrics that will be computed to compare
+    each commit with the directory. They may be any list from ['same', 'diff']
+
+    :param repo:          Repo object (git repository)
+    :param dir:           directory to compare with the git repository
+    :param metrics_kinds: kinds of metrics to analyze each commit
 
     """
 
-    def __init__(self, repo, dir):
+    def __init__(self, repo, dir, metrics_kinds=['diff']):
 
         # List of commit hashes, ordered as returned by git
         self.commits = []
@@ -340,6 +345,9 @@ class Metrics:
         # Repository and directory to compare
         self.repo = repo
         self.dir = dir
+        for metric in metrics_kinds:
+            assert metric in ['diff', 'same']
+        self.metrics_kinds = metrics_kinds
 
     def add_commit(self, commit, date):
         """Add commit info to data structure.
@@ -378,7 +386,7 @@ class Metrics:
 
         return len(self.commits)
 
-    def compute_metrics(self, commit_no, metrics=['diff']):
+    def compute_metrics(self, commit_no):
         """Compute metrics for commmit number (ordered as from git log).
 
         For an explanation of the metrics instantiation parameter, read
@@ -392,17 +400,13 @@ class Metrics:
 
         :param commits: list of all commits
         :param commit_no: commit number (starting in 0)
-        :param metrics: metrics to produce when comparing (list)
         :returns: dictionary with metrics
         """
-
-        for metric in metrics:
-            assert metric in ['diff', 'same']
 
         commit = self.commits[commit_no]
         subprocess.call(["git", "-C", self.repo.dir, "checkout", commit[0]],
                         stdout = subprocess.DEVNULL, stderr = subprocess.DEVNULL)
-        dircmp = BaseDir(self.dir, metrics)
+        dircmp = BaseDir(self.dir, metrics=self.metrics_kinds)
         m = dircmp.compare(self.repo.dir)
         logging.debug ("Commit %s. Metrics: %s" % (str(commit), str(m)))
         m["commit_seq"] = commit_no
@@ -410,7 +414,7 @@ class Metrics:
         m["date"] = commit[1]
         return m
 
-    def compute_range (self, first, last, step, metrics=['diff']):
+    def compute_range (self, first, last, step):
         """Compute metrics for a range of commits.
 
         Compute metrics for a range of commits, but only for those in the
@@ -426,11 +430,11 @@ class Metrics:
         for seq_no in list(range(first, last, step)) + [last]:
             logging.info("Computing metrics for %d." % seq_no)
             if seq_no not in self.metrics:
-                m = self.compute_metrics(seq_no, metrics)
+                m = self.compute_metrics(seq_no)
                 logging.debug(m)
                 self.metrics[seq_no] = m
 
-    def closest_range (self, length, metric='diff',closest_fn=min):
+    def closest_range (self, length, metric='diff_files',closest_fn=min):
         """Find range of minimum values.
 
         Returns a range of closes values. The range will have at least
@@ -496,21 +500,136 @@ class Metrics:
 
         return [self.metrics[seq_no] for seq_no in sorted(self.metrics)]
 
+    def find_upstream_commit (self, steps=10, name=None,
+            closest_fn=min, metric='diff_files'):
+        """Find the most likely upstream commit.
+
+        Compares a source code directory with the checkouts from its upstream
+        git repo, with the intention of finding the most likely upstream commit
+        for the specific source code in the directory. The directory usually
+        corresponds to a snapshot of the git repository, like a downloadable
+        tarball, or a Debian/Ubuntu package. Although it is derived from the
+        upstream repository, usually it is not exactly equal to any checkout
+        (commit) from it. Therefore, we use several metrics to estimate how
+        close any checkout from the upstream repo is to the directory.
+
+        closest_fn and metric usually work together. metric is the metric that
+        will be used to decide if a commit is closer to the directory than other.
+        Depending on the metric, we want to maximize (for similarity metrics)
+        or minimize it (for difference metrics).
+
+        :param after:        check only commits after this date
+        :type after:         datetime.datetime
+        :param steps:        do approximation according to these steps
+        :param name:         name of package being computed (Default: dir)
+        :type name:          string
+        :param closest_fn:   function to evaluate the closest commit (min or max)
+        :param metric:       metric to decide if a commit is closer or not
+        :returns:            dictionary with infom about most similar commit
+
+        """
+
+        if name is None:
+            name = self.dir
+        self.add_commits(self.repo.get_commits())
+        logging.info("%d commits parsed." % self.num_commits())
+
+        left = 0
+        right = self.num_commits() - 1
+        # Next calculates the ceiling integer division
+        # Needed because we want eg. 1/3 to be 1
+        step = -(-self.num_commits() // steps)
+        while step >= 1:
+            self.compute_range (left, right, step)
+            (left, right, closest_seq, closest_value) \
+                = self.closest_range(length=3, metric=metric,
+                                    closest_fn=closest_fn)
+            logging.info("Step: %d, left: %d, right: %d, closest seq: %d, closest value: %d."
+                    % (step, left, right, closest_seq, closest_value))
+            if step == 1:
+                step = 0
+            else:
+                candidate_step = -(-step // steps)
+                if candidate_step >= step:
+                    step = step - 1
+                else:
+                    step = candidate_step
+        closest_commit = self.get_commit(closest_seq)
+        most_similar = {
+            'sequence': closest_seq,
+            'diff': closest_value,
+            'hash': closest_commit[0],
+            'date': closest_commit[1]
+            }
+
+        csv_header = "CSV,name,"
+        csv_string = "CSV,{name},"
+        if 'same' in self.metrics_kinds:
+            csv_header += 'common_files, common_lines, same_files, same_lines'
+            csv_string += '{common_files:6d}, {common_lines:9d}, ' \
+                + '{same_files:6d}, {same_lines:9d}'
+        if 'diff' in self.metrics_kinds:
+            csv_header += 'different_files, different_lines, ' \
+                + 'left_files, left_lines, right_files, right_lines'
+            csv_string += '{different_files:6d}, {different_lines:9d}, ' \
+                + '{left_files:6d}, {left_lines:9d}, ' \
+                + '{right_files:6d}, {right_lines:9d}'
+        csv_header += 'diff_files, added_lines, removed_lines, equal_lines'
+        csv_string += '{diff_files:6d}, ' \
+            + '{added_lines:9d}, {removed_lines:9d}, {equal_lines:9d}'
+
+        logging.info(csv_header.format(name=name))
+        for m in self.metrics_items():
+            m['hash']=m['commit'][0:7]
+            logging.info(csv_string.format(name=name, **m))
+        return (most_similar)
+
 class Repo:
     """Metainformation about a git repository.
 
-    :param url:      repo url
-    :param dir:      path of directory for repo
-    :param after:    only considering commits after this date (default None, means all considered)
-    :type after:      datetime.datetime
+    This class abstracts a git upstream reposory, by using Perceval.
+
+    Upon instantiation of and object in this class, the specified
+    upstream repository is cloned in the specified local directory.
+    Then, Perceval is used again to obtain the list of
+    its commits. The object offers a method for checking out any of
+    those commits as well, and copying the resulting checkout to
+    a certain 'storage'directory.
+
+    Only commits authored since a certain date will be considered,
+    by specifying the after parameter when instantiating. By default (None),
+    all commits are considered.
+
+    By default, only commits from master branch are considered, but
+    a list of branches to consider can be provided when instantiating.
+
+    Objects in this class may maintain as well a file cache, using Shelve,
+    with the list of commits, so that there is no need to recompute them if
+    the cache can be read. This is only done if the cache argument is
+    provided when instantiating an object. The cache is maintained so that
+    either the complete list of commits is in it, or no commit is available
+    at all. This is so because it only makes sense to maintain the cache
+    if there is no need to parse git log again.
+
+    Each object maintains the list of commits for its repository. For
+    each commit, a list [hash, commit_date] is maintanined. The order is
+    the one provided by Perceval, which corresponds to the order by
+    git log, in reverse order.
+
+    :param url:      url of upstream git repository
+    :type url:       string
+    :param dir:      path of local directory for cloning the git repository
+    :type dir:       string
+    :param after:    consider only commits after this date
+    :type after:     datetime.datetime
     :param branches: branches to consider (default None, means "all branches")
-    :param    cache: cache for storing commits
-    :type     cache: str
     :type branches:  list of str
+    :param cache:    path for the cache for storing commits
+    :type cache:     str
 
     """
 
-    def __init__(self, url, dir, after=None, branches=None, cache=None):
+    def __init__(self, url, dir, after=None, branches=["master"], cache=None):
 
         self.url = url
         self.dir = dir
@@ -520,18 +639,29 @@ class Repo:
             self.after = after
         self.branches = branches
 
+        # Get the git repository always, to be able of checking out later,
+        # if needed
+        parser = perceval.backends.git.Git(uri=self.url, gitpath=self.dir)
+
+        # The cache is ok if the calue for 'done' is True
         cache_ok = False
         if cache is not None:
             cache_data = shelve.open(cache)
             if 'done' in cache_data and cache_data['done']:
                 cache_ok = True
+
+        # Get commits from the cache (if ok) or from the repo (via Perceval)
         if cache_ok:
             self.commits = cache_data['commits']
         else:
-            parser = perceval.backends.git.Git(uri=self.url, gitpath=self.dir)
             self.commits = []
-            for item in parser.fetch(from_date = self.after, branches=self.branches):
-                self.commits.append([item['data']['commit'], item['data']['CommitDate']])
+            commits_fetcher = parser.fetch(from_date = self.after,
+                                            branches=self.branches)
+            for item in commits_fetcher:
+                self.commits.append([item['data']['commit'],
+                                    item['data']['CommitDate']])
+
+        # Store data in the cache, if needed
         if cache is not None:
             if not cache_ok:
                 cache_data['commits'] = self.commits
@@ -542,6 +672,8 @@ class Repo:
     def get_commits (self):
         """Get list of commits.
 
+        Get the list of commits managed by objects in this class.
+
         :returns:         list of commits (each commit is a list [hash, date])
 
         """
@@ -551,23 +683,31 @@ class Repo:
     def last_commit (self):
         """Get last commit number.
 
+        Get the last commit in the list maintained by objects in this class.
+        This sould correspond to the last commit produced by git log, in
+        reverse orther (that is, the first commit produced by git log).
+
         """
 
         return len(self.commits) - 1
 
     def checkout(self, commit_no, store=None):
-        """Copy a checkout of the repo to dir.
+        """Checkout the version of the repository corresponding to commit_no.
 
-        If store is None, just checkout the commit in the repo, but don't
-        copy it to a directory. If not none, it will be the directory for
-        storage, where a directory will be produced, with the hash as name,
+        If store is None, just checkout the commit in the repo, in the
+        directory specified when instantiating the object, but don't
+        copy it to a directory.
+
+        If store is not None, it will be the directory for
+        storage, where a subdirectory will be produced, with the hash as name,
         to copy the checkout.
+
         If specified, store should exist. If there is already a checkout for
         this commit in store, just checkout in the repository, but don't copy.
 
         :param commit_no: commit number to check out
         :param store:     directory to copy the checkout to (default: None)
-        :returns:          path of directory with the checkout, or None if none
+        :returns:         path of directory with the checkout, or None if none
 
         """
 
@@ -582,127 +722,36 @@ class Repo:
         else:
             return None
 
-    def compute_diff(self, commit_no, dir):
-        """Compute diff metrics between the repo checkout for commit_no and dir.
-
-        Checks out commit_no (as per git log order) in the git repository, and
-        computes the metrics for its difference with the given directory.
-        The returned metrics are those produced by compare_dirs plus:
-         * commit: hash for the commit
-         * date: commit date for the commit (as a string)
-
-        :param commit_no: commit number to checkout
-        :param dir:       directory to compare
-        :returns: dictionary with metrics
-        """
-
-        commit = self.commits[commit_no]
-        self.checkout(commit_no)
-
-        dircmp = BaseDir(self.dir)
-        m = dircmp.compare(dir)
-
-        logging.debug ("Commit %s. Files: %d, %d, %d, lines: %d, %d, %d, %d)"
-            % (commit[0], m["left_files"], m["right_files"], m["diff_files"],
-            m["left_lines"], m["right_lines"],
-            m["added_lines"], m["removed_lines"]))
-        m["total_files"] = m["left_files"] + m["right_files"] + m["diff_files"]
-        m["total_lines"] = m["left_lines"] + m["right_lines"] \
-            + m["added_lines"] + m["removed_lines"]
-        m["commit_seq"] = commit_no
-        m["commit"] = commit[0]
-        m["date"] = commit[1]
-        return m
-
-
-def find_upstream_commit (upstream, dir, steps=10, name=None,
-        metrics_kinds=['diff'], closest_fn=min, metric='diff_lines'):
-    """Find the most likely upstream commit.
-
-    Compares a source code directory with the checkouts from its upstream
-    git repo, with the intention of finding the most likely upstream commit
-    for the specific source code in the directory. The directory usually
-    corresponds to a snapshot of the git repository, like a downloadable
-    tarball, or a Debian/Ubuntu package. Although it is derived from the
-    upstream repository, usually it is not exactly equal to any checkout
-    (commit) from it. Therefore, we use several metrics to estimate how
-    close any checkout from the upstream repo is to the directory.
-
-    metrics_kind are the metrics that will be computed to compare each commit
-    with the directory. They may be any list from ['same', 'diff']
-
-    closest_fn and metric usually work together. metric is the metric that
-    will be used to decide if a commit is closer to the directory than other.
-    Depending on the metric, we want to maximize (for similarity metrics)
-    or minimize it (for difference metrics).
-
-    :param upstream:     upstream git repository metadata
-    :type upstream:      Repo
-    :param dir:          source code directory to match to upstream
-    :param after:        check only commits after this date
-    :type after:         datetime.datetime
-    :param steps:        do approximation according to these steps
-    :param name:         name of package being computed (Default: dir)
-    :type name:          string
-    :param metrics_kind: kinds of metrics to analyze each commit
-    :param closest_fn:   function to evaluate the closest commit (min or max)
-    :param metric:       metric to decide if a commit is closer or not
-    :returns:            dictionary with infom about most similar commit
-
-    """
-
-    if name is None:
-        name = dir
-    metrics = Metrics(repo=upstream, dir=dir)
-    metrics.add_commits(upstream.get_commits())
-    logging.info("%d commits parsed." % metrics.num_commits())
-
-    left = 0
-    right = metrics.num_commits() - 1
-    # Next calculates the ceiling integer division
-    # Needed because we want eg. 1/3 to be 1
-    step = -(-metrics.num_commits() // steps)
-    while step >= 1:
-        metrics.compute_range (left, right, step, metrics=metrics_kinds)
-        (left, right, closest_seq, closest_value) \
-            = metrics.closest_range(length=3, metric=metric,
-                                closest_fn=closest_fn)
-        logging.info("Step: %d, left: %d, right: %d, closest seq: %d, closest value: %d."
-                    % (step, left, right, closest_seq, closest_value))
-        if step == 1:
-            step = 0
-        else:
-            candidate_step = -(-step // steps)
-            if candidate_step >= step:
-                step = step - 1
-            else:
-                step = candidate_step
-    closest_commit = metrics.get_commit(closest_seq)
-    most_similar = {
-        'sequence': closest_seq,
-        'diff': closest_value,
-        'hash': closest_commit[0],
-        'date': closest_commit[1]
-    }
-
-    csv_header = "CSV,name,"
-    csv_string = "CSV,{name},"
-    if 'same' in metrics_kinds:
-        csv_header += 'common_files, common_lines, same_files, same_lines'
-        csv_string += '{common_files:6d}, {common_lines:9d}, ' \
-            + '{same_files:6d}, {same_lines:9d}'
-    if 'diff' in metrics_kinds:
-        csv_header += 'different_files, different_lines, ' \
-            + 'left_files, left_lines, right_files, right_lines'
-        csv_string += '{different_files:6d}, {different_lines:9d}, ' \
-            + '{left_files:6d}, {left_lines:9d}, ' \
-            + '{right_files:6d}, {right_lines:9d}'
-    csv_header += 'diff_files, added_lines, removed_lines, equal_lines'
-    csv_string += '{diff_files:6d}, ' \
-        + '{added_lines:9d}, {removed_lines:9d}, {equal_lines:9d}'
-
-    logging.info(csv_header.format(name=name))
-    for m in metrics.metrics_items():
-        m['hash']=m['commit'][0:7]
-        logging.info(csv_string.format(name=name, **m))
-    return (most_similar)
+    # def compute_diff(self, commit_no, dir, metrics=['diff']):
+    #     """Compute diff metrics between the repo checkout for commit_no and dir.
+    #
+    #     Checks out commit_no (as per git log order) in the git repository, and
+    #     computes the metrics for its difference with the given directory.
+    #     The returned metrics are those produced by compare_dirs plus:
+    #      * commit: hash for the commit
+    #      * date: commit date for the commit (as a string)
+    #
+    #     :param commit_no: commit number to checkout
+    #     :param dir:       directory to compare
+    #     :param metrics:   metrics to produce when comparing (list)
+    #     :returns:         dictionary with metrics
+    #
+    #     """
+    #
+    #     commit = self.commits[commit_no]
+    #     self.checkout(commit_no)
+    #
+    #     dircmp = BaseDir(self.dir, metrics)
+    #     m = dircmp.compare(dir)
+    #
+    #     logging.debug ("Commit %s. Files: %d, %d, %d, lines: %d, %d, %d, %d)"
+    #         % (commit[0], m["left_files"], m["right_files"], m["diff_files"],
+    #         m["left_lines"], m["right_lines"],
+    #         m["added_lines"], m["removed_lines"]))
+    #     m["total_files"] = m["left_files"] + m["right_files"] + m["diff_files"]
+    #     m["total_lines"] = m["left_lines"] + m["right_lines"] \
+    #         + m["added_lines"] + m["removed_lines"]
+    #     m["commit_seq"] = commit_no
+    #     m["commit"] = commit[0]
+    #     m["date"] = commit[1]
+    #     return m
