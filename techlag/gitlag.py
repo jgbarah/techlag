@@ -311,7 +311,7 @@ class Repo:
     #     m["total_files"] = m["left_files"] + m["right_files"] + m["diff_files"]
     #     m["total_lines"] = m["left_lines"] + m["right_lines"] \
     #         + m["added_lines"] + m["removed_lines"]
-    #     m["commit_seq"] = commit_no
+    #     m["commit_no"] = commit_no
     #     m["commit"] = commit[0]
     #     m["date"] = commit[1]
     #     return m
@@ -646,7 +646,7 @@ class Metrics:
         subprocess.call(["git", "-C", self.repo.dir, "checkout", commit[0]],
                         stdout = subprocess.DEVNULL, stderr = subprocess.DEVNULL)
         m = self.basedir.compare(self.repo.dir)
-        m["commit_seq"] = commit_no
+        m["commit_no"] = commit_no
         m["commit"] = commit[0]
         m["date"] = commit[1]
         logging.debug ("Commit %s. Metrics: %s" % (str(commit), str(m)))
@@ -757,68 +757,13 @@ class Metrics:
 
         return [self.metrics[commit_no] for commit_no in sorted(self.metrics)]
 
-    def closest_commit (self, steps=10, name=None,
-                        closest_fn=min, metric='diff_files'):
-        """Find the closest commit, for the given function and metric.
-
-        Compares the base directory with the checkouts from a
-        git repo, with the intention of finding the closest checkout.
-
-        closest_fn and metric usually work together. metric is the metric that
-        will be used to decide if a commit is closer to the directory than other.
-        Depending on the metric, we want to maximize (for similarity metrics)
-        or minimize it (for difference metrics).
-
-        Instead of checking all checkouts, whcih may be very time consuming,
-        we will follow an interative strategy. First, we will compute the
-        comparison metrics for the first and last commits, and for one
-        commit out of every steps. After that, the closest range will be
-        identified, and the metrics computed again for that range, with
-        steps as the ratio to calculate the step. That will follow until
-        metrics are computed for a range with step 1.
-
-        :param steps:        do approximation according to these steps
-        :param name:         name of package being computed (Default: dir)
-        :type name:          string
-        :param closest_fn:   function to evaluate the closest commit (min or max)
-        :param metric:       metric to decide if a commit is closer or not
-        :returns:            dictionary with infom about most similar commit
+    def dump_csv (self, name):
+        """Dump computed metrics in CSV format, using logging.info
 
         """
 
-        if name is None:
-            name = self.dir
-
-        left = 0
-        right = len(self.commits) - 1
-        # Next calculates the ceiling integer division
-        # Needed because we want eg. 1/3 to be 1
-        step = -( -len(self.commits) // steps)
-        while step >= 1:
-            self.range_metrics (left, right, step)
-            (left, right, closest_seq, closest_value) \
-                = self.closest_range(length=3, metric=metric,
-                                    closest_fn=closest_fn)
-            logging.info("Step: %d, left: %d, right: %d, closest seq: %d, closest value: %d."
-                    % (step, left, right, closest_seq, closest_value))
-            if step == 1:
-                step = 0
-            else:
-                candidate_step = -(-step // steps)
-                if candidate_step >= step:
-                    step = step - 1
-                else:
-                    step = candidate_step
-        closest_commit = self.commits[closest_seq]
-        most_similar = {
-            'sequence': closest_seq,
-            'diff': closest_value,
-            'hash': closest_commit[0],
-            'date': closest_commit[1]
-            }
-
-        csv_header = "CSV,name,"
-        csv_string = "CSV,{name},"
+        csv_header = "CSV,name                ,commit_no,"
+        csv_string = "CSV,{name:20s},{commit_no:7d},"
         if 'same' in self.metrics_kinds:
             csv_header += 'common_files, common_lines, same_files, same_lines'
             csv_string += '{common_files:6d}, {common_lines:9d}, ' \
@@ -837,4 +782,82 @@ class Metrics:
         for m in self.metrics_items():
             m['hash']=m['commit'][0:7]
             logging.info(csv_string.format(name=name, **m))
+
+    def closest_commit (self, ratio=10, name=None,
+                        closest_fn=min, metric='diff_files'):
+        """Find the closest commit, for the given function and metric.
+
+        Compares the base directory with the checkouts from a
+        git repo, with the intention of finding the closest checkout.
+
+        closest_fn and metric usually work together. metric is the metric that
+        will be used to decide if a commit is closer to the directory than other.
+        Depending on the metric, we want to maximize (for similarity metrics)
+        or minimize it (for difference metrics).
+
+        Instead of checking all checkouts, which may be very time consuming,
+        we will follow an interative strategy:
+
+        * We compute an initial step by using ratio, just dividing the
+        number of commits by the ratio.
+        * Then, we compute the comparison metrics for the first and
+        last commits, and for one commit out of every step.
+        * After that, we identify the range of closest commits
+        (largest or smallest), by using a list of some commmits with the
+        closest metrics. The range will be from the first to the last
+        commits in that list, plus one more computed commit on the left,
+        and another one on the right.
+        * For this new range, we compute again the step, using the ration
+        by dividing the number of commits in the range by it.
+        * We compute the comparison metric for the step-commits again
+        * We identify the new range of closest commits.
+        * We compute again the step...
+
+        This process is followed until until metrics are computed for a
+        range with step 1.
+
+        If name parameter is None, or is not present, name will be
+        the last component of the base directory.
+
+        :param ratio:       ratio to apply when calculating step for a range
+        :param name:        name of package being computed
+        :type name:         string
+        :param closest_fn:  function to evaluate the closest commit (min or max)
+        :param metric:      metric to decide if a commit is closer or not
+        :returns:           dictionary with infom about most similar commit
+
+        """
+
+        if name is None:
+            name = os.path.basename(self.dir)
+
+        left = 0
+        right = len(self.commits) - 1
+        # Next calculates the ceiling integer division
+        # Needed because we want eg. 1/3 to be 1
+        step = -( -len(self.commits) // ratio)
+        while step >= 1:
+            self.range_metrics (left, right, step)
+            closest = self.closest_range(length=3, metric=metric,
+                                        closest_fn=closest_fn)
+            (left, right, closest_seq, closest_value) = closest
+            logging.info("Step: %d, left: %d, right: %d, closest seq: %d, closest value: %d."
+                    % (step, left, right, closest_seq, closest_value))
+            if step == 1:
+                step = 0
+            else:
+                candidate_step = -( -(right-left+1) // ratio)
+                if candidate_step >= step:
+                    step = step - 1
+                else:
+                    step = candidate_step
+        closest_commit = self.commits[closest_seq]
+        most_similar = {
+            'sequence': closest_seq,
+            'diff': closest_value,
+            'hash': closest_commit[0],
+            'date': closest_commit[1]
+            }
+
+        self.dump_csv(name=name)
         return (most_similar)
