@@ -783,7 +783,7 @@ class Metrics:
             m['hash']=m['commit'][0:7]
             logging.info(csv_string.format(name=name, **m))
 
-    def closest_commit (self, ratio=10, name=None,
+    def closest_commit (self, ratio=10, range=3, name=None,
                         closest_fn=min, metric='diff_files'):
         """Find the closest commit, for the given function and metric.
 
@@ -816,10 +816,15 @@ class Metrics:
         This process is followed until until metrics are computed for a
         range with step 1.
 
+        Therefore, ratio controls how much commmits will be computed during each iteration (the larger the ratio, the larger the number of commits during each iteration). range is the length of the list of closest commits
+        during each iteration. The larger the range, the less likely to
+        find a local minimum (or maximum) instead of the true closest value.
+
         If name parameter is None, or is not present, name will be
         the last component of the base directory.
 
-        :param ratio:       ratio to apply when calculating step for a range
+        :param ratio:       ratio to calcuate steps each iteration (Default: 10)
+        :param range:       length of the range for each iteration (Default: 3)
         :param name:        name of package being computed
         :type name:         string
         :param closest_fn:  function to evaluate the closest commit (min or max)
@@ -838,7 +843,7 @@ class Metrics:
         step = -( -len(self.commits) // ratio)
         while step >= 1:
             self.range_metrics (left, right, step)
-            closest = self.closest_range(length=3, metric=metric,
+            closest = self.closest_range(length=range, metric=metric,
                                         closest_fn=closest_fn)
             (left, right, closest_seq, closest_value) = closest
             logging.info("Step: %d, left: %d, right: %d, closest seq: %d, closest value: %d."
