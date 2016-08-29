@@ -36,6 +36,7 @@ import datetime
 import shutil
 import shelve
 import shlex
+import tempfile
 
 """This module provides classes for estimating the more likely checkout
 in a git repository, when comparing to a certain directory. The directory
@@ -260,8 +261,10 @@ class Repo:
 
         If copy is not None, it will be the directory for storage,
         where a copy of the checkout will be produced (excluding the
-        .git subdirectory). This directory should not exist previously.
-        In this case, git archive will be used, which means that the
+        .git subdirectory). If the directory does already exist,
+        no checkout will be done: its contents will be assumed to
+        be that checkout. If the directory does not exist, it will be
+        created, and git archive will be used, which means that the
         repository will not be really checked out (it will remain in
         the same commit as it was before calling this function).
 
@@ -276,7 +279,8 @@ class Repo:
             subprocess.call(["git", "-C", self.dir, "checkout", hash],
                         stdout = subprocess.DEVNULL, stderr = subprocess.DEVNULL)
             return None
-        else:
+        elif not os.path.isdir(copy):
+            os.makedirs(copy)
             subprocess.check_call("git -C " + shlex.quote(self.dir) \
                                 + " archive --format tar " + hash \
                                 + " | tar -x -C " + shlex.quote(copy),
@@ -563,13 +567,17 @@ class Metrics:
     each commit with the directory. They may be any list from ['same', 'diff'].
     See BaseDir class to learn more about the metrics computed in each case.
 
+    If provided and not None, store will be used as a directory for
+    intermediate storage. If provided, the directory should exist.
+
     :param repo:          Repo object (git repository)
     :param dir:           directory to compare with the git repository
     :param metrics_kinds: kinds of metrics to analyze each commit
+    :param store:         directory for intermediate storage
 
     """
 
-    def __init__(self, repo, dir, metrics_kinds=['diff']):
+    def __init__(self, repo, dir, metrics_kinds=['diff'], store=None):
 
         self.repo = repo
         self.dir = dir
@@ -583,6 +591,20 @@ class Metrics:
         logging.info("Metrics: %d commits parsed." % len(self.commits))
         # Dictionary with metrics, key is the commit number (order in commits)
         self.metrics = {}
+        if store is not None:
+            assert os.path.is_dir(store)
+        self.store = store
+
+    def _get_store_dir (self):
+        """Get a directory suitable for intermediate storage.
+
+        If the directory does not exist, it is created.
+
+        """
+
+        if self.store is None:
+            self.store = tempfile.mkdtemp(prefix='gitlag_')
+        return self.store
 
     # def add_commit(self, commit, date):
     #     """Add commit info to data structure.
@@ -869,13 +891,16 @@ class Metrics:
         self.dump_csv(name=name)
         return (most_similar)
 
-    def compare_checkouts (left_commit, right_commit):
+    def compare_checkouts (self, left_commit, right_commit):
 
         # Checkout left_commit to a new directory
-        self.repo.checkout (commit_no=left_commit, store=store)
+        store = self._get_store_dir()
+        left_dir = os.path.join(store, self.commits[left_commit][0])
+        self.repo.checkout (commit_no=left_commit, copy=left_dir)
         # Create a BaseDir with left commit for comparing
-        left_dir = BaseDir (name=store)
+        left_dir = BaseDir (name=left_dir)
         # Checkout right_commit
-        self.repo.checkout (commit_no=right_commit, store=None)
+        self.repo.checkout (commit_no=right_commit, copy=None)
         # Compare
         m = left_dir.compare (self.repo.dir)
+        return m

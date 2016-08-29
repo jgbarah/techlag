@@ -35,9 +35,12 @@ if not '..' in sys.path:
 
 import techlag.gitlag
 
-class TestCompareGit(unittest.TestCase):
-    """Tests for comparing a directory to a git repository"""
+class TestGitSimple (unittest.TestCase):
+    """Root class for setting up data for tests with a simple git repo.
 
+    Does not include any real test.
+
+    """
     @classmethod
     def setUpClass(cls):
         cls.tmp_path = tempfile.mkdtemp(prefix='gitlag_')
@@ -55,6 +58,9 @@ class TestCompareGit(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         shutil.rmtree(cls.tmp_path)
+
+class TestCompareGit(TestGitSimple):
+    """Tests for comparing a directory to a git repository"""
 
     def test_closest_commit(self):
         """Test Metrics.closest_commit"""
@@ -96,6 +102,23 @@ class TestCompareGit(unittest.TestCase):
         result = metrics.closest_commit(closest_fn=max,
                                                 metric='common_lines')
         self.assertEqual(result, expected_3)
+
+class TestCompareCheckouts(TestGitSimple):
+    """Tests for comparing checkouts"""
+
+    def test_compare_checkouts (self):
+        """Test Metrics.compare_checkouts"""
+
+        expected = {'diff_files': 1, 'left_files': 2, 'right_files': 1,
+            'equal_lines': 5, 'different_lines': 10, 'different_files': 2,
+            'left_lines': 9, 'added_lines': 4, 'right_lines': 3,
+            'removed_lines': 5
+            }
+        repo = techlag.gitlag.Repo(url=self.url_git, dir=self.cloned_git)
+        metrics = techlag.gitlag.Metrics(repo=repo, dir=self.dir2,
+                                        metrics_kinds=['same'])
+        result = metrics.compare_checkouts(1, 0)
+        self.assertEqual (result, expected)
 
 class TestCompareGitSmall(unittest.TestCase):
     """Tests for comparing a dirctory to a small git repository
@@ -170,7 +193,7 @@ class TestCompareGitSmall(unittest.TestCase):
                                         metric='common_lines')
         self.assertEqual(result, self.expected[2])
 
-    def test_closest_commit_4(self):
+    def test_closest_commit_4 (self):
         """Test Metrics.closest_commit"""
 
         metrics = techlag.gitlag.Metrics(repo=self.repo, dir=self.dir4,
@@ -180,6 +203,7 @@ class TestCompareGitSmall(unittest.TestCase):
         expected = self.expected[1].copy()
         expected['diff'] = 1890
         self.assertEqual(result, expected)
+
 
 if __name__ == "__main__":
 #    logging.basicConfig(level=logging.DEBUG)
