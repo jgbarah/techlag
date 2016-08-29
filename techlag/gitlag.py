@@ -35,6 +35,7 @@ import io
 import datetime
 import shutil
 import shelve
+import shlex
 
 """This module provides classes for estimating the more likely checkout
 in a git repository, when comparing to a certain directory. The directory
@@ -251,36 +252,36 @@ class Repo:
 
         return len(self.commits) - 1
 
-    def checkout(self, commit_no, store=None):
+    def checkout(self, commit_no, copy=None):
         """Checkout the version of the repository corresponding to commit_no.
 
-        If store is None, just checkout the commit in the repo, in the
-        directory specified when instantiating the object, but don't
-        copy it to a directory.
+        If copy is None, just checkout the commit in the repo itself,
+        but don't copy it to a directory.
 
-        If store is not None, it will be the directory for
-        storage, where a subdirectory will be produced, with the hash as name,
-        to copy the checkout.
-
-        If specified, store should exist. If there is already a checkout for
-        this commit in store, just checkout in the repository, but don't copy.
+        If copy is not None, it will be the directory for storage,
+        where a copy of the checkout will be produced (excluding the
+        .git subdirectory). This directory should not exist previously.
+        In this case, git archive will be used, which means that the
+        repository will not be really checked out (it will remain in
+        the same commit as it was before calling this function).
 
         :param commit_no: commit number to check out
-        :param store:     directory to copy the checkout to (default: None)
+        :param copy:      directory to copy the checkout to (default: None)
         :returns:         path of directory with the checkout, or None if none
 
         """
 
         hash = self.commits[commit_no][0]
-        subprocess.call(["git", "-C", self.dir, "checkout", hash],
+        if copy is None:
+            subprocess.call(["git", "-C", self.dir, "checkout", hash],
                         stdout = subprocess.DEVNULL, stderr = subprocess.DEVNULL)
-        if store is not None:
-            checkout_dir = os.path.join(store, hash)
-            if not os.path.isdir(checkout_dir):
-                shutil.copytree(self.dir, checkout_dir)
-            return checkout_dir
-        else:
             return None
+        else:
+            subprocess.check_call("git -C " + shlex.quote(self.dir) \
+                                + " archive --format tar " + hash \
+                                + " | tar -x -C " + shlex.quote(copy),
+                                shell=True)
+        return copy
 
     # def compute_diff(self, commit_no, dir, metrics=['diff']):
     #     """Compute diff metrics between the repo checkout for commit_no and dir.
@@ -621,7 +622,7 @@ class Metrics:
     #     return len(self.commits)
 
     def commit_metrics(self, commit_no):
-        """Compute comparison metrics for a given coommit.
+        """Compute comparison metrics for a given commit.
 
         Check out the corresponding commit in the git repository, and
         compute the metrics for commparing it with the base directory.
@@ -757,6 +758,7 @@ class Metrics:
 
         return [self.metrics[commit_no] for commit_no in sorted(self.metrics)]
 
+
     def dump_csv (self, name):
         """Dump computed metrics in CSV format, using logging.info
 
@@ -866,3 +868,14 @@ class Metrics:
 
         self.dump_csv(name=name)
         return (most_similar)
+
+    def compare_checkouts (left_commit, right_commit):
+
+        # Checkout left_commit to a new directory
+        self.repo.checkout (commit_no=left_commit, store=store)
+        # Create a BaseDir with left commit for comparing
+        left_dir = BaseDir (name=store)
+        # Checkout right_commit
+        self.repo.checkout (commit_no=right_commit, store=None)
+        # Compare
+        m = left_dir.compare (self.repo.dir)

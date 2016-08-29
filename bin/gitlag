@@ -22,11 +22,16 @@
 ##
 
 description = """
-Compare directories
+Compare a directory with a git repository to find the most likely checkout.
+
+Assuming that a directory is similar to some checkout of a git repository,
+compute metrics for comparing those checkouts with the directory, until
+the most likely checkout (the one more similar to the directory) is found.
 
 Example:
 
-gitlag --repo git.repo -p git-2.7.0 --after 2016-02-01 --steps 10 -l info
+gitlag --repo git.repo -p git-2.7.0 --after 2016-02-01 \
+    --ratio 10 --range 3 -l info
 
 """
 
@@ -58,12 +63,16 @@ def parse_args ():
                         help = "Logging level for output")
     parser.add_argument("--logfile", type=str,
                         help = "Log file")
-    parser.add_argument("--steps", type=int, default=5,
-                        help = "Steps (compare every steps commits, instead of all)")
+    parser.add_argument("--ratio", type=int, default=5,
+                        help = "Ratio to calculate steps in each iteration")
+    parser.add_argument("--range", type=int, default=5,
+                        help = "Number of computed commits in the range in each iteration")
+    parser.add_argument("--gitcache", type=str, default=None,
+                        help = "Cache for results of git log")
     args = parser.parse_args()
     return args
 
-def lag (name, upstream, dir, after, steps, store):
+def lag (name, upstream, dir, after, store, ratio=10, range=3):
     """Compute technical lag for directory with respect to upstream repository.
 
     :param name:      name of package being computed
@@ -73,14 +82,17 @@ def lag (name, upstream, dir, after, steps, store):
     :param dir:      path to directory (source code derived from upstream repo)
     :param after:    check only commits after this date, format: %Y-%m-%d
     :type after:      datetime.datetime
-    :param steps:     do approximation according to these steps
+    :param ratio:     do approximation according to this ratio
+    :param range:     do approximation according to this range
     :param store:    directory to store checkouts
 
     """
 
-    up_commit = techlag.gitlag.find_upstream_commit (upstream=upstream, dir=dir,
-                                                    after=after, steps=steps,
-                                                    name=name)
+    metrics = techlag.gitlag.Metrics(repo=upstream, dir=dir,
+                                    metrics_kinds=['same'])
+    up_commit = metrics.closest_commit (closest_fn=max, metric='common_lines',
+                                        ratio=ratio, range=range,
+                                        name=name)
     logging.info ("{}: most similar upstream checkout is {} (diff: {}, date: {}, hash: {}).".format(
             name, up_commit['sequence'], up_commit['diff'],
             up_commit['date'], up_commit['hash']
@@ -122,15 +134,18 @@ if __name__ == "__main__":
         after = None
 
     upstream = techlag.gitlag.Repo(url=args.repo, dir=args.repo,
-                                    after=after, branches=['master'])
+                                    after=after, branches=['master'],
+                                    cache=args.gitcache)
 
     store = tempfile.TemporaryDirectory()
     if len(pkg_releases) > 0:
         for pkg_release in pkg_releases:
             dsc_file = techlag.gitlag.get_dpkg(name=pkg_name, release=pkg_release, dir=store.name)
             dir = techlag.gitlag.extract_dpkg(dsc_file)
-            lag (name=pkg_name+':'+pkg_release, upstream=upstream,
-                dir=dir, after=after, steps=args.steps, store=store.name)
+            lag(name=pkg_name+':'+pkg_release, upstream=upstream,
+                dir=dir, after=after, steps=args.steps, range=args.range,
+                store=store.name)
     else:
         dir = args.pkg
-        lag (name=dir, upstream=upstream, dir=dir, after=after, steps=args.steps, store=store.name)
+        lag (name=dir, upstream=upstream, dir=dir, after=after,
+            ratio=args.ratio, range=args.range, store=store.name)
