@@ -31,7 +31,7 @@ the most likely checkout (the one more similar to the directory) is found.
 Example:
 
 gitlag --repo git.repo -p git-2.7.0 --after 2016-02-01 \
-    --ratio 10 --range 3 -l info
+    --ratio 5 --range 3 -gitcache git.repo.cache -l info
 
 """
 
@@ -88,23 +88,30 @@ def lag (name, upstream, dir, after, store, ratio=10, range=3):
 
     """
 
+    # Create a Metrics object and compute the closest commit
     metrics = techlag.gitlag.Metrics(repo=upstream, dir=dir,
-                                    metrics_kinds=['same'])
-    up_commit = metrics.closest_commit (closest_fn=max, metric='common_lines',
-                                        ratio=ratio, range=range,
-                                        name=name)
-    logging.info ("{}: most similar upstream checkout is {} (diff: {}, date: {}, hash: {}).".format(
-            name, up_commit['sequence'], up_commit['diff'],
-            up_commit['date'], up_commit['hash']
-            ))
-    checkout = upstream.checkout(commit_no=upstream.last_commit(), store=store)
-    metrics = upstream.compute_diff(commit_no=up_commit['sequence'], dir=checkout)
-    logging.info (metrics)
-    metrics['diff_commits'] = upstream.last_commit() - metrics['commit_seq']
-    result_str = "{}: technical lag to master HEAD {} (commits), {} (lines), {} (files)"
-    print (result_str.format(name, metrics['diff_commits'],
-                            metrics['total_lines'], metrics['total_files']),
-        flush=True)
+                                    metrics_kinds=['same'], store=store)
+    commit = metrics.closest_commit (closest_fn=max, metric='common_lines',
+                                    ratio=ratio, range=range,
+                                    name=name)
+    info_str = "{}: most similar upstream checkout is {} " \
+        + "(diff: {}, date: {}, hash: {})."
+    logging.info (info_str.format(
+                            name, commit['sequence'], commit['diff'],
+                            commit['date'], commit['hash']
+                            ))
+    logging.info ('Number of commits computed: ' + str(len(metrics.metrics)) \
+                + " out of a total of " + str(metrics.last_commit_no()+1))
+    # Compare the closest commit with the head (last commit)
+    metrics_data = metrics.compare_checkouts (commit['sequence'],
+                                            metrics.last_commit_no())
+    logging.info ("Metrics comparing with last commit: " + str(metrics_data))
+    metrics_data['diff_commits'] = metrics.last_commit_no() - commit['sequence']
+    result_str = "{}: technical lag to master HEAD is " \
+        + "{} (commits), {} (lines), {} (files)"
+    print (result_str.format(name, metrics_data['diff_commits'],
+                            metrics_data['common_lines'], metrics_data['common_files']),
+            flush=True)
 
 if __name__ == "__main__":
     args = parse_args()

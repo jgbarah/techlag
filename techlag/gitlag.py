@@ -592,7 +592,7 @@ class Metrics:
         # Dictionary with metrics, key is the commit number (order in commits)
         self.metrics = {}
         if store is not None:
-            assert os.path.is_dir(store)
+            assert os.path.isdir(store)
         self.store = store
 
     def _get_store_dir (self):
@@ -642,6 +642,13 @@ class Metrics:
     #     """
     #
     #     return len(self.commits)
+
+    def last_commit_no(self):
+        """ Returns the latest commit number.
+
+        """
+
+        return self.repo.last_commit()
 
     def commit_metrics(self, commit_no):
         """Compute comparison metrics for a given commit.
@@ -786,8 +793,8 @@ class Metrics:
 
         """
 
-        csv_header = "CSV,name                ,commit_no,"
-        csv_string = "CSV,{name:20s},{commit_no:7d},"
+        csv_header = "CSV,name                ,commit_no,   hash,       date,"
+        csv_string = "CSV,{name:20s},{commit_no:7d},{hash:7s},{date:20s},"
         if 'same' in self.metrics_kinds:
             csv_header += 'common_files, common_lines, same_files, same_lines'
             csv_string += '{common_files:6d}, {common_lines:9d}, ' \
@@ -876,8 +883,8 @@ class Metrics:
                 step = 0
             else:
                 candidate_step = -( -(right-left+1) // ratio)
-                if candidate_step >= step:
-                    step = step - 1
+                if (candidate_step >= step // 2) and (step // 2 >= 1):
+                    step = step // 2
                 else:
                     step = candidate_step
         closest_commit = self.commits[closest_seq]
@@ -891,14 +898,28 @@ class Metrics:
         self.dump_csv(name=name)
         return (most_similar)
 
-    def compare_checkouts (self, left_commit, right_commit):
+    def compare_checkouts (self, left_commit, right_commit, metrics_kinds=None):
+        """Compare two checkouts of the git repository
 
+        As a side effect, the left commit is checked out in a directory
+        under the store for this Metrics object. That means that as long as
+        that store remains, the checkout won't be done again, and the
+        contents of that directory are assumed to correspond to the checkout.
+
+        :param left_commit:   commit number to be considered as left checkout
+        :param right_commit:  commit number to be considered as right checkout
+        :param metrics_kinds: kinds of metrics to analyze each commit
+
+        """
+
+        if metrics_kinds is None:
+             metrics_kinds = self.metrics_kinds
         # Checkout left_commit to a new directory
         store = self._get_store_dir()
         left_dir = os.path.join(store, self.commits[left_commit][0])
         self.repo.checkout (commit_no=left_commit, copy=left_dir)
         # Create a BaseDir with left commit for comparing
-        left_dir = BaseDir (name=left_dir)
+        left_dir = BaseDir (name=left_dir, metrics=metrics_kinds)
         # Checkout right_commit
         self.repo.checkout (commit_no=right_commit, copy=None)
         # Compare
