@@ -81,46 +81,6 @@ def parse_args ():
     args = parser.parse_args()
     return args
 
-def lag (name, upstream, dir, after, store, ratio=10, range=3):
-    """Compute technical lag for directory with respect to upstream repository.
-
-    :param name:      name of package being computed
-    :type name:       string
-    :param upstream: upstream git repository Metainformation
-    :type upstream:   techlag.gitlago.Repo
-    :param dir:      path to directory (source code derived from upstream repo)
-    :param after:    check only commits after this date, format: %Y-%m-%d
-    :type after:      datetime.datetime
-    :param ratio:     do approximation according to this ratio
-    :param range:     do approximation according to this range
-    :param store:    directory to store checkouts
-
-    """
-
-    # Create a Metrics object and compute the closest commit
-    metrics = techlag.gitlag.Metrics(repo=upstream, dir=dir,
-                                    metrics_kinds=['same'], store=store)
-    commit = metrics.closest_commit (closest_fn=max, metric='common_lines',
-                                    ratio=ratio, range=range,
-                                    name=name)
-    info_str = "{}: most similar upstream checkout is {} " \
-        + "(diff: {}, date: {}, hash: {})."
-    logging.info (info_str.format(
-                            name, commit['sequence'], commit['diff'],
-                            commit['date'], commit['hash']
-                            ))
-    logging.info ('Number of commits computed: ' + str(len(metrics.metrics)) \
-                + " out of a total of " + str(metrics.last_commit_no()+1))
-    # Compare the closest commit with the head (last commit)
-    metrics_data = metrics.compare_checkouts (commit['sequence'],
-                                            metrics.last_commit_no())
-    logging.info ("Metrics comparing with last commit: " + str(metrics_data))
-    metrics_data['diff_commits'] = metrics.last_commit_no() - commit['sequence']
-    result_str = "{}: technical lag to master HEAD is " \
-        + "{} (commits), {} (lines), {} (files)"
-    print (result_str.format(name, metrics_data['diff_commits'],
-                            metrics_data['common_lines'], metrics_data['common_files']),
-            flush=True)
 
 if __name__ == "__main__":
     args = parse_args()
@@ -166,10 +126,10 @@ if __name__ == "__main__":
                                             release=pkg_release,
                                             dir=store)
             dir = techlag.gitlag.extract_dpkg(dsc_file)
-            lag(name=pkg_name+':'+pkg_release, upstream=upstream,
+            techlag.gitlag.lag(name=pkg_name+':'+pkg_release, upstream=upstream,
                 dir=dir, after=after, ratio=args.ratio, range=args.range, store=store)
     else:
         # Checking only against one directory
         dir = args.pkg
-        lag (name=dir, upstream=upstream, dir=dir, after=after,
+        techlag.gitlag.lag (name=dir, upstream=upstream, dir=dir, after=after,
             ratio=args.ratio, range=args.range, store=store)

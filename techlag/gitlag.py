@@ -28,6 +28,7 @@ import os.path
 import shutil
 import gzip
 import urllib.request
+import json
 import perceval.backends
 import subprocess
 import logging
@@ -47,6 +48,7 @@ upstream repository, usually it is not exactly equal to any checkout
 close any checkout from the upstream repo is to the directory.
 
 """
+
 
 def get_dpkg_data (file_name, pkg_name):
     """Get the urls of the components of a source package in aSources.gz file.
@@ -145,6 +147,64 @@ def extract_dpkg(dpkg, remove=False):
         logging.info('Error while extracting package for {}'.format(dpkg))
         raise ChildProcessError('Error extracting package', dpkg)
     return dir
+
+def get_json(url):
+
+    logging.debug("get_json: " + url)
+    try:
+        response = urllib.request.urlopen(url).read()
+    except urllib.error.HTTPError as error:
+        if error.code == 404:
+            return None
+        else:
+            raise
+    data = json.loads(response.decode('utf-8'))
+    return data['result']
+
+def get_dpkg_snapshot(name, version, dir):
+    """Get a debian source package from Debian Snapshot, given its name and version.
+
+    Gets the components of the source code package from the corresponding Debian
+    repository, and stores them in dir. To do that, it first gets the
+    Sources.gz file  for the corresponding distribution (eg: testing/main),
+    looks in it for the components of the package, and downloads them.
+
+    :param    name: name of the Debian package
+    :param version: Debian version
+    :param     dir: name (path) of the directory to download the components
+    :returns: path of the downloaded dsc file for the package
+
+    """
+
+    # Get the url describing the files for the source package
+    files_url = 'http://snapshot.debian.org/mr/package/' + name + '/' \
+        + version + '/srcfiles'
+    files = get_json(files_url)
+    if files is None:
+        logging.info("Ignoring version (because no src files): " + version)
+        raise ValueError("No src files found in description for package", version)
+    for file in files:
+        # Get the url describing a file
+        file_url = 'http://snapshot.debian.org/mr/file/' \
+            + file['hash'] + '/info'
+        logging.info("File: " + file_url)
+        info = get_json(file_url)[0]
+        download_url = 'http://snapshot.debian.org/archive/' \
+            + info['archive_name'] + '/' + info['first_seen'] \
+            + info['path'] + '/' + info['name']
+        file_name = os.path.join(dir, info['name'])
+        if os.path.isfile(file_name):
+            logging.info('Already present, not downloading: ' + download_url)
+        else:
+            logging.info('To download: ' + download_url)
+            (name, headers) = urllib.request.urlretrieve(url=download_url,
+                filename=file_name)
+            logging.info('Downloaded: ' + name)
+        if os.path.splitext(file_name)[1] == '.dsc':
+            dsc = file_name
+            date = info['first_seen']
+    return (dsc, date)
+
 
 class Repo:
     """Metainformation about a git repository.
@@ -287,39 +347,6 @@ class Repo:
                                 shell=True)
         return copy
 
-    # def compute_diff(self, commit_no, dir, metrics=['diff']):
-    #     """Compute diff metrics between the repo checkout for commit_no and dir.
-    #
-    #     Checks out commit_no (as per git log order) in the git repository, and
-    #     computes the metrics for its difference with the given directory.
-    #     The returned metrics are those produced by compare_dirs plus:
-    #      * commit: hash for the commit
-    #      * date: commit date for the commit (as a string)
-    #
-    #     :param commit_no: commit number to checkout
-    #     :param dir:       directory to compare
-    #     :param metrics:   metrics to produce when comparing (list)
-    #     :returns:         dictionary with metrics
-    #
-    #     """
-    #
-    #     commit = self.commits[commit_no]
-    #     self.checkout(commit_no)
-    #
-    #     dircmp = BaseDir(self.dir, metrics)
-    #     m = dircmp.compare(dir)
-    #
-    #     logging.debug ("Commit %s. Files: %d, %d, %d, lines: %d, %d, %d, %d)"
-    #         % (commit[0], m["left_files"], m["right_files"], m["diff_files"],
-    #         m["left_lines"], m["right_lines"],
-    #         m["added_lines"], m["removed_lines"]))
-    #     m["total_files"] = m["left_files"] + m["right_files"] + m["diff_files"]
-    #     m["total_lines"] = m["left_lines"] + m["right_lines"] \
-    #         + m["added_lines"] + m["removed_lines"]
-    #     m["commit_no"] = commit_no
-    #     m["commit"] = commit[0]
-    #     m["date"] = commit[1]
-    #     return m
 
 class BaseDir():
     """Base directory to compare with others.
@@ -606,43 +633,6 @@ class Metrics:
             self.store = tempfile.mkdtemp(prefix='gitlag_')
         return self.store
 
-    # def add_commit(self, commit, date):
-    #     """Add commit info to data structure.
-    #
-    #     :param commit: hash of the commit
-    #     :param date: commit date
-    #
-    #     """
-    #
-    #     self.commits.append([commit, date])
-
-    # def add_commits(self, commits):
-    #     """Update info about commits to data structure.
-    #
-    #     Commits come as a list of dictionaries, one per commit, in order
-    #     (according to the order in Perceval, or git log for that matter).
-    #     Each item in the list is a list [commit, date].
-    #
-    #     :param commits: list of hashes for commits
-    #
-    #     """
-    #
-    #     self.commits = commits
-
-    # def get_commit(self, seq_no):
-    #     """Get a commit tuple (hash, date) for a given commit sequence.
-    #
-    #     """
-    #
-    #     return self.commits[seq_no]
-
-    # def num_commits(self):
-    #     """Return the number of commits stored.
-    #
-    #     """
-    #
-    #     return len(self.commits)
-
     def last_commit_no(self):
         """ Returns the latest commit number.
 
@@ -925,3 +915,47 @@ class Metrics:
         # Compare
         m = left_dir.compare (self.repo.dir)
         return m
+
+def lag (name, upstream, dir, after, store, ratio=10, range=3):
+    """Compute technical lag for directory with respect to upstream repository.
+
+    This is a part of the high level interface of this module.
+
+    :param name:      name of package being computed
+    :type name:       string
+    :param upstream: upstream git repository Metainformation
+    :type upstream:   techlag.gitlago.Repo
+    :param dir:      path to directory (source code derived from upstream repo)
+    :param after:    check only commits after this date, format: %Y-%m-%d
+    :type after:      datetime.datetime
+    :param ratio:     do approximation according to this ratio
+    :param range:     do approximation according to this range
+    :param store:    directory to store checkouts
+
+    """
+
+    # Create a Metrics object and compute the closest commit
+    metrics = Metrics(repo=upstream, dir=dir,
+                                    metrics_kinds=['same'], store=store)
+    commit = metrics.closest_commit (closest_fn=max, metric='common_lines',
+                                    ratio=ratio, range=range,
+                                    name=name)
+    info_str = "{}: most similar upstream checkout is {} " \
+        + "(diff: {}, date: {}, hash: {})."
+    logging.info (info_str.format(
+                            name, commit['sequence'], commit['diff'],
+                            commit['date'], commit['hash']
+                            ))
+    logging.info ('Number of commits computed: ' + str(len(metrics.metrics)) \
+                + " out of a total of " + str(metrics.last_commit_no()+1))
+    # Compare the closest commit with the head (last commit)
+    metrics_data = metrics.compare_checkouts (commit['sequence'],
+                                            metrics.last_commit_no())
+    logging.info ("Metrics comparing with last commit: " + str(metrics_data))
+    metrics_data['diff_commits'] = metrics.last_commit_no() - commit['sequence']
+    result_str = "{}: technical lag to master HEAD is " \
+        + "{} (commits), {} (lines), {} (files)"
+    print (result_str.format(name, metrics_data['diff_commits'],
+                            metrics_data['common_lines'], metrics_data['common_files']),
+            flush=True)
+    return metrics_data

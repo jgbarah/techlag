@@ -26,9 +26,12 @@ Compare a collection of Debian packages with upstream
 
 The collection is read from a JSON file.
 
-Example:
+Examples:
 
 debianlag --conf pkgs.json -l info
+
+debianlag -c pkgs.json -l info --ratio 5 --range 5 --gitcache \
+    --store debian-store
 
 """
 
@@ -56,41 +59,16 @@ def parse_args ():
                         help = "Logging level for output")
     parser.add_argument("--logfile", type=str,
                         help = "Log file")
-    parser.add_argument("--steps", type=int, default=5,
-                        help = "Steps (compare every steps commits, instead of all)")
+    parser.add_argument("--ratio", type=int, default=5,
+                        help = "Ratio to calculate steps in each iteration")
+    parser.add_argument("--range", type=int, default=5,
+                        help = "Number of computed commits in the range in each iteration")
+    parser.add_argument("--gitcache", action='store_true',
+                        help = "Cache for results of git log")
+    parser.add_argument("--store", type=str, default=None,
+                        help = "Storage for intermediate files")
     args = parser.parse_args()
     return args
-
-def lag (name, upstream, dir, after, steps, store):
-    """Compute technical lag for directory with respect to upstream repository.
-
-    :param name:      name of package being computed
-    :type name:       string
-    :param upstream: upstream git repository Metainformation
-    :type upstream:   techlag.gitlago.Repo
-    :param dir:      path to directory (source code derived from upstream repo)
-    :param after:    check only commits after this date, format: %Y-%m-%d
-    :type after:      datetime.datetime
-    :param steps:     do approximation according to these steps
-    :param store:    directory to store checkouts
-
-    """
-
-    up_commit = techlag.gitlag.find_upstream_commit (upstream=upstream, dir=dir,
-                                                    after=after, steps=steps,
-                                                    name=name)
-    logging.info ("{}: most similar upstream checkout is {} (diff: {}, date: {}, hash: {}).".format(
-            name, up_commit['sequence'], up_commit['diff'],
-            up_commit['date'], up_commit['hash']
-            ))
-    checkout = upstream.checkout(commit_no=upstream.last_commit(), store=store)
-    metrics = upstream.compute_diff(commit_no=up_commit['sequence'], dir=checkout)
-    logging.info (metrics)
-    metrics['diff_commits'] = upstream.last_commit() - metrics['commit_seq']
-    result_str = "{}: technical lag to master HEAD {} (commits), {} (lines), {} (files)"
-    print (result_str.format(name, metrics['diff_commits'],
-                            metrics['total_lines'], metrics['total_files']),
-        flush=True)
 
 if __name__ == "__main__":
     args = parse_args()
@@ -114,20 +92,27 @@ if __name__ == "__main__":
     else:
         after = None
 
-    #store = tempfile.TemporaryDirectory().name
-    store = '/tmp/debianlag'
+    if args.store:
+        store = args.store
+    else:
+        tmpdir = tempfile.TemporaryDirectory()
+        store = tmpdir.name
+
+    gitcache = None
     for pkg in conf:
         name = pkg['debian']['name']
         releases = pkg['debian']['distros']
         git_url = pkg['upstream']
         git_dir = os.path.join(store, name + '.git')
-
+        if args.gitcache:
+            gitcache = os.path.join(store, name + '.gitcache')
         upstream = techlag.gitlag.Repo(url=git_url, dir=git_dir,
-                                        after=after, branches=['master'])
+                                        after=after, branches=['master'],
+                                        cache=gitcache)
 
         for release in releases:
             dsc_file = techlag.gitlag.get_dpkg(name=name, release=release,
                                                 dir=store)
             dir = techlag.gitlag.extract_dpkg(dsc_file)
-            lag (name=name+':'+release, upstream=upstream,
-                dir=dir, after=after, steps=args.steps, store=store)
+            techlag.gitlag.lag(name=name+':'+release, upstream=upstream,
+                dir=dir, after=after, ratio=args.ratio, range=args.range, store=store)

@@ -26,9 +26,12 @@ Compare a collection of Debian packages with upstream
 
 The collection is read from a JSON file, with references to Debian Snapshot.
 
-Example:
+Examples:
 
-debianlag --conf snapshot.json -l info
+debsnapshotlag --conf snapshot.json -l info
+
+debsnapshotlag -c snapshot.json -l info --ratio 5 --range 5 --gitcache \
+    --store debian-store/ --logfile debsnapshotlag-logging.log
 
 """
 
@@ -37,7 +40,6 @@ import logging
 import tempfile
 import techlag.gitlag
 import datetime
-import urllib.request
 import json
 import os.path
 import shelve
@@ -58,101 +60,17 @@ def parse_args ():
                         help = "Logging level for output")
     parser.add_argument("--logfile", type=str,
                         help = "Log file")
-    parser.add_argument("--steps", type=int, default=5,
-                        help = "Steps (compare every steps commits, instead of all)")
-    parser.add_argument("--store", type=str,
-                        help = "Directory for storage of temporary information")
+    parser.add_argument("--ratio", type=int, default=5,
+                        help = "Ratio to calculate steps in each iteration")
+    parser.add_argument("--range", type=int, default=5,
+                        help = "Number of computed commits in the range in each iteration")
+    parser.add_argument("--gitcache", action='store_true',
+                        help = "Cache for results of git log")
+    parser.add_argument("--store", type=str, default=None,
+                        help = "Storage for intermediate files")
     args = parser.parse_args()
     return args
 
-def lag (name, upstream, dir, after, steps, store):
-    """Compute technical lag for directory with respect to upstream repository.
-
-    :param name:      name of package being computed
-    :type name:       string
-    :param upstream: upstream git repository Metainformation
-    :type upstream:   techlag.gitlago.Repo
-    :param dir:      path to directory (source code derived from upstream repo)
-    :param after:    check only commits after this date, format: %Y-%m-%d
-    :type after:      datetime.datetime
-    :param steps:     do approximation according to these steps
-    :param store:    directory to store checkouts
-
-    """
-
-    up_commit = techlag.gitlag.find_upstream_commit (upstream=upstream, dir=dir,
-                                                    after=after, steps=steps,
-                                                    name=name)
-    logging.info ("{}: most similar upstream checkout is {} (diff: {}, date: {}, hash: {}).".format(
-            name, up_commit['sequence'], up_commit['diff'],
-            up_commit['date'], up_commit['hash']
-            ))
-    checkout = upstream.checkout(commit_no=upstream.last_commit(), store=store)
-    metrics = upstream.compute_diff(commit_no=up_commit['sequence'], dir=checkout)
-    logging.info (metrics)
-    metrics['diff_commits'] = upstream.last_commit() - metrics['commit_seq']
-    result_str = "{}: technical lag to master HEAD {} (commits), {} (lines), {} (files)"
-    print (result_str.format(name, metrics['diff_commits'],
-                            metrics['total_lines'], metrics['total_files']),
-        flush=True)
-    return metrics
-
-def get_json(url):
-
-    logging.debug("get_json: " + url)
-    try:
-        response = urllib.request.urlopen(url).read()
-    except urllib.error.HTTPError as error:
-        if error.code == 404:
-            return None
-        else:
-            raise
-    data = json.loads(response.decode('utf-8'))
-    return data['result']
-
-def get_dpkg_snapshot(name, version, dir):
-    """Get a debian source package from Debian Snapshot, given its name and version.
-
-    Gets the components of the source code package from the corresponding Debian
-    repository, and stores them in dir. To do that, it first gets the
-    Sources.gz file  for the corresponding distribution (eg: testing/main),
-    looks in it for the components of the package, and downloads them.
-
-    :param    name: name of the Debian package
-    :param version: Debian version
-    :param     dir: name (path) of the directory to download the components
-    :returns: path of the downloaded dsc file for the package
-
-    """
-
-    # Get the url describing the files for the source package
-    files_url = 'http://snapshot.debian.org/mr/package/' + name + '/' \
-        + version + '/srcfiles'
-    files = get_json(files_url)
-    if files is None:
-        logging.info("Ignoring version (because no src files): " + version)
-        raise ValueError("No src files found in description for package", version)
-    for file in files:
-        # Get the url describing a file
-        file_url = 'http://snapshot.debian.org/mr/file/' \
-            + file['hash'] + '/info'
-        logging.info("File: " + file_url)
-        info = get_json(file_url)[0]
-        download_url = 'http://snapshot.debian.org/archive/' \
-            + info['archive_name'] + '/' + info['first_seen'] \
-            + info['path'] + '/' + info['name']
-        file_name = os.path.join(dir, info['name'])
-        if os.path.isfile(file_name):
-            logging.info('Already present, not downloading: ' + download_url)
-        else:
-            logging.info('To download: ' + download_url)
-            (name, headers) = urllib.request.urlretrieve(url=download_url,
-                filename=file_name)
-            logging.info('Downloaded: ' + name)
-        if os.path.splitext(file_name)[1] == '.dsc':
-            dsc = file_name
-            date = info['first_seen']
-    return (dsc, date)
 
 if __name__ == "__main__":
     args = parse_args()
@@ -179,10 +97,11 @@ if __name__ == "__main__":
     if args.store:
         store = args.store
     else:
-        #store = tempfile.TemporaryDirectory().name
-        store = '/tmp/debianlag'
-    if not os.path.isdir(store):
-        os.makedirs(store)
+        tmpdir = tempfile.TemporaryDirectory()
+        store = tmpdir.name
+
+    gitcache = None
+
     with shelve.open('data.shelve') as results:
         if 'done' not in results:
             results['done'] = {}
@@ -191,11 +110,15 @@ if __name__ == "__main__":
             name = pkg['debsnapshot']['name']
             upstream_url = pkg['upstream']
             upstream_dir = os.path.join(store, name + '.git')
+
+            if args.gitcache:
+                gitcache = os.path.join(store, name + '.gitcache')
             upstream = techlag.gitlag.Repo(url=upstream_url, dir=upstream_dir,
                                         after=after, branches=['master'],
-                                        cache=upstream_dir+'.shelve')
+                                        cache=gitcache)
+
             versions_url = 'http://snapshot.debian.org/mr/package/' + name + '/'
-            versions = get_json(versions_url)
+            versions = techlag.gitlag.get_json(versions_url)
 
             for item in versions:
                 version = item['version']
@@ -206,12 +129,14 @@ if __name__ == "__main__":
                     logging.info('Already computed:' + package + ' ' + str(results['done'][package]))
                     continue
                 try:
-                    (dsc_file, date) = get_dpkg_snapshot(name=name,
+                    (dsc_file, date) = techlag.gitlag.get_dpkg_snapshot(name=name,
                                                     version=version, dir=store)
                     logging.info("DSC: " + dsc_file)
                     dir = techlag.gitlag.extract_dpkg(dsc_file, remove=True)
-                    result = lag (name=package, upstream=upstream,
-                                dir=dir, after=after, steps=args.steps, store=store)
+                    result = techlag.gitlag.lag (name=package, upstream=upstream,
+                                dir=dir, after=after,
+                                ratio=args.ratio, range=args.range,
+                                store=store)
                     results['done'][package] = {'date': date, 'result': result}
                 except Exception as err:
                     results['missing'][package] = err.args

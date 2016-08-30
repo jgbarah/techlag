@@ -109,10 +109,10 @@ class TestCompareCheckouts(TestGitSimple):
     def test_compare_checkouts (self):
         """Test Metrics.compare_checkouts"""
 
-        expected = {'diff_files': 1, 'left_files': 2, 'right_files': 1,
-            'equal_lines': 5, 'different_lines': 10, 'different_files': 2,
-            'left_lines': 9, 'added_lines': 4, 'right_lines': 3,
-            'removed_lines': 5
+        expected = {'diff_files': 1, 'equal_lines': 5,
+            'added_lines': 4, 'removed_lines': 5,
+            'common_files': 3, 'common_lines': 23,
+            'same_files': 3, 'same_lines': 18
             }
         repo = techlag.gitlag.Repo(url=self.url_git, dir=self.cloned_git)
         metrics = techlag.gitlag.Metrics(repo=repo, dir=self.dir2,
