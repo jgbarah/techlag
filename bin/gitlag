@@ -28,10 +28,17 @@ Assuming that a directory is similar to some checkout of a git repository,
 compute metrics for comparing those checkouts with the directory, until
 the most likely checkout (the one more similar to the directory) is found.
 
+The directory can be the result of unpacking a Debian package, which will
+be downloaed from the Debian repositories. In this case, several releases
+of the same package can be retrieved and compared with the git repository.
+
 Example:
 
 gitlag --repo git.repo -p git-2.7.0 --after 2016-02-01 \
-    --ratio 5 --range 3 -gitcache git.repo.cache -l info
+    --ratio 5 --range 5 -gitcache git.repo.cache -l info
+
+gitlag --repo git.repo --debian_name git stretch/main \
+    --ratio 5 --range 5 --gitcache git.repo.cache -l info
 
 """
 
@@ -69,6 +76,8 @@ def parse_args ():
                         help = "Number of computed commits in the range in each iteration")
     parser.add_argument("--gitcache", type=str, default=None,
                         help = "Cache for results of git log")
+    parser.add_argument("--store", type=str, default=None,
+                        help = "Storage for intermediate files")
     args = parser.parse_args()
     return args
 
@@ -140,19 +149,27 @@ if __name__ == "__main__":
     else:
         after = None
 
+    if args.store:
+        store = args.store
+    else:
+        tmpdir = tempfile.TemporaryDirectory()
+        store = tmpdir.name
+
     upstream = techlag.gitlag.Repo(url=args.repo, dir=args.repo,
                                     after=after, branches=['master'],
                                     cache=args.gitcache)
 
-    store = tempfile.TemporaryDirectory()
     if len(pkg_releases) > 0:
+        # Check Debian releases for the specified package
         for pkg_release in pkg_releases:
-            dsc_file = techlag.gitlag.get_dpkg(name=pkg_name, release=pkg_release, dir=store.name)
+            dsc_file = techlag.gitlag.get_dpkg(name=pkg_name,
+                                            release=pkg_release,
+                                            dir=store)
             dir = techlag.gitlag.extract_dpkg(dsc_file)
             lag(name=pkg_name+':'+pkg_release, upstream=upstream,
-                dir=dir, after=after, steps=args.steps, range=args.range,
-                store=store.name)
+                dir=dir, after=after, ratio=args.ratio, range=args.range, store=store)
     else:
+        # Checking only against one directory
         dir = args.pkg
         lag (name=dir, upstream=upstream, dir=dir, after=after,
-            ratio=args.ratio, range=args.range, store=store.name)
+            ratio=args.ratio, range=args.range, store=store)
