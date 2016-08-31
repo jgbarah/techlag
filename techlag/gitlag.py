@@ -783,21 +783,21 @@ class Metrics:
 
         """
 
-        csv_header = "CSV,name                ,commit_no,   hash,       date,"
-        csv_string = "CSV,{name:20s},{commit_no:7d},{hash:7s},{date:20s},"
+        csv_header = "CSV,name,commit_no,hash,date"
+        csv_string = "CSV,{name},{commit_no},{hash},{date}"
         if 'same' in self.metrics_kinds:
-            csv_header += 'common_files, common_lines, same_files, same_lines'
-            csv_string += '{common_files:6d}, {common_lines:9d}, ' \
-                + '{same_files:6d}, {same_lines:9d}'
+            csv_header += ',common_files,common_lines,same_files,same_lines'
+            csv_string += ',{common_files:6d},{common_lines:9d}' \
+                + ',{same_files:6d},{same_lines:9d}'
         if 'diff' in self.metrics_kinds:
-            csv_header += 'different_files, different_lines, ' \
-                + 'left_files, left_lines, right_files, right_lines'
-            csv_string += '{different_files:6d}, {different_lines:9d}, ' \
-                + '{left_files:6d}, {left_lines:9d}, ' \
-                + '{right_files:6d}, {right_lines:9d}'
-        csv_header += 'diff_files, added_lines, removed_lines, equal_lines'
-        csv_string += '{diff_files:6d}, ' \
-            + '{added_lines:9d}, {removed_lines:9d}, {equal_lines:9d}'
+            csv_header += ',different_files,different_lines' \
+                + ',left_files,left_lines,right_files,right_lines'
+            csv_string += ',{different_files:6d},{different_lines:9d}' \
+                + ',{left_files:6d},{left_lines:9d}' \
+                + ',{right_files:6d},{right_lines:9d}'
+        csv_header += ',diff_files,added_lines,removed_lines,equal_lines'
+        csv_string += ',{diff_files:6d}' \
+            + ',{added_lines:9d},{removed_lines:9d},{equal_lines:9d}'
 
         logging.info(csv_header.format(name=name))
         for m in self.metrics_items():

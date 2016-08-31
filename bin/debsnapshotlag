@@ -82,7 +82,7 @@ if __name__ == "__main__":
             level = logging.DEBUG
         if args.logfile:
             logging.basicConfig(format=log_format, level=level,
-                                filename = args.logfile, filemode = "w")
+                                filename = args.logfile, filemode = "a")
         else:
             logging.basicConfig(format=log_format, level=level)
 
@@ -102,10 +102,9 @@ if __name__ == "__main__":
 
     gitcache = None
 
-    with shelve.open('data.shelve') as results:
-        if 'done' not in results:
-            results['done'] = {}
-        results['missing'] = {}
+    with shelve.open('data-done') as done, shelve.open('data-missing') as missing:
+        missing = {}
+        missing.sync()
         for pkg in conf:
             name = pkg['debsnapshot']['name']
             upstream_url = pkg['upstream']
@@ -125,8 +124,9 @@ if __name__ == "__main__":
                 logging.info("Version: " + version)
 
                 package = name+':'+version
-                if package in results['done']:
-                    logging.info('Already computed:' + package + ' ' + str(results['done'][package]))
+                if package in done:
+                    logging.info('Already computed:' + package + ' ' \
+                        + str(done[package]))
                     continue
                 try:
                     (dsc_file, date) = techlag.gitlag.get_dpkg_snapshot(name=name,
@@ -137,12 +137,14 @@ if __name__ == "__main__":
                                 dir=dir, after=after,
                                 ratio=args.ratio, range=args.range,
                                 store=store)
-                    results['done'][package] = {'date': date, 'result': result}
+                    done[package] = {'date': date, 'result': result}
+                    done.sync()
                 except Exception as err:
-                    results['missing'][package] = err.args
+                    missing[package] = err.args
+                    missing.sync()
                     continue
 
         print("RESULTS:")
-        print(results['done'])
+        print(done)
         print("MISSING:")
-        print(results['missing'])
+        print(missing)
