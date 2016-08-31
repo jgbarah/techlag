@@ -103,7 +103,7 @@ if __name__ == "__main__":
     gitcache = None
 
     with shelve.open('data-done') as done, shelve.open('data-missing') as missing:
-        missing = {}
+        missing.clear()
         missing.sync()
         for pkg in conf:
             name = pkg['debsnapshot']['name']

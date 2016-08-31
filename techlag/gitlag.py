@@ -950,7 +950,8 @@ def lag (name, upstream, dir, after, store, ratio=10, range=3):
                 + " out of a total of " + str(metrics.last_commit_no()+1))
     # Compare the closest commit with the head (last commit)
     metrics_data = metrics.compare_checkouts (commit['sequence'],
-                                            metrics.last_commit_no())
+                                            metrics.last_commit_no(),
+                                            metrics_kinds=['same', 'diff'])
     logging.info ("Metrics comparing with last commit: " + str(metrics_data))
     metrics_data['diff_commits'] = metrics.last_commit_no() - commit['sequence']
     result_str = "{}: technical lag to master HEAD is " \
