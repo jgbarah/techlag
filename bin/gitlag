@@ -35,7 +35,7 @@ of the same package can be retrieved and compared with the git repository.
 Example:
 
 gitlag --repo git.repo -p git-2.7.0 --after 2016-02-01 \
-    --ratio 5 --range 5 -gitcache git.repo.cache -l info
+    --ratio 5 --range 5 --gitcache git.repo.cache -l info
 
 gitlag --repo git.repo --debian_name git stretch/main \
     --ratio 5 --range 5 --gitcache git.repo.cache -l info
@@ -126,10 +126,25 @@ if __name__ == "__main__":
                                             release=pkg_release,
                                             dir=store)
             dir = techlag.gitlag.extract_dpkg(dsc_file)
-            techlag.gitlag.lag(name=pkg_name+':'+pkg_release, upstream=upstream,
-                dir=dir, after=after, ratio=args.ratio, range=args.range, store=store)
+            result = techlag.gitlag.lag(name=pkg_name+':'+pkg_release,
+                                        upstream=upstream, dir=dir,
+                                        after=after, ratio=args.ratio,
+                                        range=args.range, store=store)
+            result_str = "{}: technical lag to master HEAD is " \
+                + "{} (normal effort), {} (commits), {} (lines), {} (files)"
+            print (result_str.format(dir, result['normal_effort'],
+                                result['diff_commits'],
+                                result['different_lines'], result['different_files']),
+                flush=True)
     else:
         # Checking only against one directory
         dir = args.pkg
-        techlag.gitlag.lag (name=dir, upstream=upstream, dir=dir, after=after,
-            ratio=args.ratio, range=args.range, store=store)
+        result = techlag.gitlag.lag (name=dir, upstream=upstream, dir=dir,
+                                    after=after, ratio=args.ratio,
+                                    range=args.range, store=store)
+        result_str = "{}: technical lag to master HEAD is " \
+                + "{} (normal effort), {} (commits), {} (lines), {} (files)"
+        print (result_str.format(dir, result['normal_effort'],
+                                    result['diff_commits'],
+                                    result['different_lines'], result['different_files']),
+                    flush=True)

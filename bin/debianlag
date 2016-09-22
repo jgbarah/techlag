@@ -114,5 +114,11 @@ if __name__ == "__main__":
             dsc_file = techlag.gitlag.get_dpkg(name=name, release=release,
                                                 dir=store)
             dir = techlag.gitlag.extract_dpkg(dsc_file)
-            techlag.gitlag.lag(name=name+':'+release, upstream=upstream,
+            result = techlag.gitlag.lag(name=name+':'+release, upstream=upstream,
                 dir=dir, after=after, ratio=args.ratio, range=args.range, store=store)
+            result_str = "{}: technical lag to master HEAD is " \
+                + "{} (normal effort), {} (commits), {} (lines), {} (files)"
+            print (result_str.format(dir, result['normal_effort'],
+                                result['diff_commits'],
+                                result['different_lines'], result['different_files']),
+                flush=True)

@@ -953,7 +953,6 @@ class Metrics:
                 author_dates[author][date_str] += 1
             else:
                 author_dates[author][date_str] = 1
-            print("Authorship", self.repo.authorship[commit])
         effort = 0
         for commit_days in author_dates.values():
             effort += len(commit_days)
@@ -997,9 +996,7 @@ def lag (name, upstream, dir, after, store, ratio=10, range=3):
                                             metrics_kinds=['same', 'diff'])
     logging.info ("Metrics comparing with last commit: " + str(metrics_data))
     metrics_data['diff_commits'] = metrics.last_commit_no() - commit['sequence']
-    result_str = "{}: technical lag to master HEAD is " \
-        + "{} (commits), {} (lines), {} (files)"
-    print (result_str.format(name, metrics_data['diff_commits'],
-                            metrics_data['common_lines'], metrics_data['common_files']),
-            flush=True)
+    metrics_data['normal_effort'] = metrics.normalized_effort(
+        left_commit=commit['sequence'], right_commit=metrics.last_commit_no()
+        )
     return metrics_data

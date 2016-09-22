@@ -28,5 +28,11 @@
     "debsnapshot": {
       "name": "git"
     }
+  },
+  {
+    "upstream": "https://github.com/openssl/openssl",
+    "debsnapshot": {
+      "name": "openssl"
+    }
   }
 ]
