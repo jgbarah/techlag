@@ -21,6 +21,10 @@
 ##   Jesus M. Gonzalez-Barahona <jgb@bitergia.com>
 ##
 
+"""Show results from debsnapshotlag in CSV format
+
+"""
+
 import shelve
 
 if __name__ == "__main__":

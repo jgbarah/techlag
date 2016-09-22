@@ -275,18 +275,26 @@ class Repo:
         # Get commits from the cache (if ok) or from the repo (via Perceval)
         if cache_ok:
             self.commits = cache_data['commits']
+            self.authorship = cache_data['authorship']
         else:
             self.commits = []
+            self.authorship = []
             commits_fetcher = parser.fetch(from_date = self.after,
                                             branches=self.branches)
             for item in commits_fetcher:
                 self.commits.append([item['data']['commit'],
                                     item['data']['CommitDate']])
+                author = {
+                    'author': item['data']['Author'],
+                    'authordate': item['data']['AuthorDate']
+                    }
+                self.authorship.append(author)
 
         # Store data in the cache, if needed
         if cache is not None:
             if not cache_ok:
                 cache_data['commits'] = self.commits
+                cache_data['authorship'] = self.authorship
                 cache_data['done'] = True
             cache_data.close()
 
@@ -915,6 +923,41 @@ class Metrics:
         # Compare
         m = left_dir.compare (self.repo.dir)
         return m
+
+    def normalized_effort (self, left_commit, right_commit):
+        """Computes the normalized effort between two commits.
+
+        We define normalized effort (in days) for an author,
+        between two commmits, as the number of days with at least
+        one commit between the dates corresponding to thos two commits.
+
+        We define the normalized effort (in days) for a project,
+        between two commits, as the sum of the normalized effort
+        for all the authors active during the period between those
+        two commits.
+
+        :param eft_commit:   commit number to be considered as left checkout
+        :param right_commit: commit number to be considered as right checkout
+
+        """
+
+        author_dates = {}
+        for commit in range(left_commit,right_commit+1):
+            author = self.repo.authorship[commit]['author']
+            date = self.repo.authorship[commit]['authordate']
+            date = datetime.datetime.strptime(date, "%a %b %d %H:%M:%S %Y %z")
+            date_str = str(date.year)+'.'+str(date.month)+'.'+str(date.day)
+            if author not in author_dates:
+                author_dates[author] = {}
+            if date_str in author_dates[author]:
+                author_dates[author][date_str] += 1
+            else:
+                author_dates[author][date_str] = 1
+            print("Authorship", self.repo.authorship[commit])
+        effort = 0
+        for commit_days in author_dates.values():
+            effort += len(commit_days)
+        return(effort)
 
 def lag (name, upstream, dir, after, store, ratio=10, range=3):
     """Compute technical lag for directory with respect to upstream repository.
